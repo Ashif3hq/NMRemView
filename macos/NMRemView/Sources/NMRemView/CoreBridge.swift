@@ -131,7 +131,9 @@ final class CoreBridge {
     private var lastError: String?
 
     init() throws {
-        guard let url = Bundle.module.url(forResource: "nmrcore", withExtension: "js"),
+        // Packaged .app keeps nmrcore.js in Contents/Resources; `swift run` uses the SwiftPM bundle.
+        guard let url = Bundle.main.url(forResource: "nmrcore", withExtension: "js")
+                ?? Bundle.module.url(forResource: "nmrcore", withExtension: "js"),
               let source = try? String(contentsOf: url) else { throw CoreError.missingBundle }
         context = JSContext()
         context.exceptionHandler = { [weak self] _, exc in

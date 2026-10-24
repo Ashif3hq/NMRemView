@@ -2031,6 +2031,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     { name: "Rutin (DMSO-d\u2086)", formula: "C27H30O16", solvent: "DMSO-d6", h: [[12.59, "s", 1], [7.55, "m", 2], [6.84, "d", 1], [6.39, "d", 1], [6.19, "d", 1], [5.34, "d", 1], [4.38, "s", 1], [3.3, "m", 10], [0.99, "d", 3]], c: [177.4, 164.1, 161.2, 156.6, 156.4, 148.4, 144.8, 133.3, 121.6, 121.2, 116.3, 115.2, 104, 101.2, 100.8, 98.7, 93.6, 76.5, 75.9, 74.1, 72, 70.6, 70.4, 70, 68.3, 67, 17.7] },
     // Polymers (repeat unit, CDCl3).
     { name: "cis-1,4-Polyisoprene (natural rubber)", formula: "C5H8", polymer: true, h: [[5.12, "br s", 1], [2.03, "br s", 4], [1.68, "s", 3]], c: [135.2, 125, 32.2, 26.4, 23.4] },
+    { name: "Polymyrcene", formula: "C10H16", polymer: true, h: [[5.1, "br s", 2], [2.02, "br s", 8], [1.68, "s", 3], [1.6, "s", 3]], c: [139.2, 131.3, 124.9, 124.4, 37.1, 32.1, 28.4, 26.8, 25.8, 17.7] },
     { name: "trans-1,4-Polyisoprene (gutta-percha)", formula: "C5H8", polymer: true, h: [[5.12, "br s", 1], [2, "br s", 4], [1.6, "s", 3]], c: [134.9, 124.2, 39.7, 26.7, 16] },
     { name: "1,4-Polybutadiene", formula: "C4H6", polymer: true, h: [[5.4, "br s", 2], [2.06, "br s", 4]], c: [130, 129.5, 32.7, 27.4] },
     { name: "Polystyrene", formula: "C8H8", polymer: true, h: [[7.06, "m", 3], [6.57, "m", 2], [1.84, "m", 1], [1.42, "m", 2]], c: [145.3, 127.9, 125.6, 43.5, 40.4] },
@@ -2416,6 +2417,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
   var mw = (f) => (formulaInfo(f) || { mw: 0 }).mw;
   var POLYMERS = [
     { id: "pi", name: "Polyisoprene", unit: "C5H8", signal: { label: "=CH (1,4)", from: 5.25, to: 4.95, nH: 1 }, alt: { label: "CH\u2083", from: 1.75, to: 1.5, nH: 3 }, micro: "isoprene" },
+    { id: "pmy", name: "Polymyrcene", unit: "C10H16", signal: { label: "=CH (1,4: 2H), corrected for 3,4 and 1,2 units", from: 5.25, to: 4.95, nH: 2 }, micro: "myrcene" },
     { id: "pb", name: "Polybutadiene", unit: "C4H6", signal: { label: "=CH (1,4 + 1,2)", from: 5.65, to: 5.25, nH: 2 }, micro: "butadiene" },
     { id: "ps", name: "Polystyrene", unit: "C8H8", signal: { label: "Ar\u2013H", from: 7.4, to: 6.25, nH: 5 } },
     { id: "pmma", name: "Poly(methyl methacrylate)", unit: "C5H8O2", signal: { label: "OCH\u2083", from: 3.7, to: 3.5, nH: 3 } },
@@ -2435,6 +2437,13 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     { id: "ch2oh", name: "Hydroxymethyl \u2013CH\u2082OH", nH: 2, ppm: "3.6\u20134.1 (CH\u2082OH)", mass: mw("CH3O") },
     { id: "bn", name: "Benzyl ester/ether (BnOH initiator)", nH: 2, ppm: "5.1 (OCH\u2082Ph)", mass: mw("C7H7O") },
     { id: "ph", name: "Phenyl (aromatic end)", nH: 5, ppm: "7.1\u20137.4 (Ar\u2013H)", mass: mw("C6H5") },
+    // RAFT agents: the chain carries the R group at one end and the Z group at the other, so the
+    // end-group mass is that of the whole chain-transfer agent.
+    { id: "ddmat", name: "RAFT: DDMAT (trithiocarbonate, S\u2013CH\u2082)", nH: 2, ppm: "3.2\u20133.35 (S\u2013CH\u2082C\u2081\u2081H\u2082\u2083)", mass: mw("C17H32O2S3") },
+    { id: "ddmat-me", name: "RAFT: DDMAT (dodecyl CH\u2083)", nH: 3, ppm: "0.85\u20130.92 (CH\u2083)", mass: mw("C17H32O2S3") },
+    { id: "cdtpa", name: "RAFT: CDTPA (trithiocarbonate, S\u2013CH\u2082)", nH: 2, ppm: "3.2\u20133.35 (S\u2013CH\u2082C\u2081\u2081H\u2082\u2083)", mass: mw("C19H33NO2S3") },
+    { id: "cpdb", name: "RAFT: CPDB (dithiobenzoate, o-Ar\u2013H)", nH: 2, ppm: "7.85\u20138.0 (o-Ar\u2013H)", mass: mw("C11H11NS2") },
+    { id: "cpadb", name: "RAFT: CPADB (dithiobenzoate, o-Ar\u2013H)", nH: 2, ppm: "7.85\u20138.0 (o-Ar\u2013H)", mass: mw("C13H13NO2S2") },
     { id: "tms", name: "Trimethylsilyl", nH: 9, ppm: "0.0\u20130.2 (Si(CH\u2083)\u2083)", mass: mw("C3H9Si") },
     { id: "vinyl", name: "Vinyl / methacrylate end (=CH\u2082)", nH: 2, ppm: "4.6\u20136.2 (=CH\u2082)", mass: mw("C2H3") },
     { id: "cho", name: "Aldehyde (\u2013CHO)", nH: 1, ppm: "9.5\u20139.8 (CHO)", mass: mw("CHO") },
@@ -2471,6 +2480,22 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       const ct = cis + trans > 0 ? { cis: 100 * cis / (cis + trans), trans: 100 * trans / (cis + trans) } : null;
       return { rows: r, cisTrans: ct, note: "cis/trans from the CH\u2083 signals (cis 1.68, trans 1.60 ppm); 3,4-unit CH\u2083 also falls near 1.6 ppm." };
     }
+    if (kind === "myrcene") {
+      const u34 = A(4.82, 4.6) / 2;
+      const u12 = A(5.9, 5.55) / 1;
+      const u14 = Math.max(0, (A(5.25, 4.95) - u34 - u12) / 2);
+      const tot = u14 + u34 + u12;
+      if (!(tot > 0)) return null;
+      return {
+        rows: [
+          { label: "1,4-units", pct: 100 * u14 / tot, how: "=CH, \u03B4 5.1 (2H, backbone + side chain)" },
+          { label: "3,4-units", pct: 100 * u34 / tot, how: "=CH\u2082, \u03B4 4.7\u20134.8 (2H)" },
+          { label: "1,2-units", pct: 100 * u12 / tot, how: "CH=, \u03B4 5.6\u20135.8 (1H)" }
+        ],
+        cisTrans: null,
+        note: "The 5.1 ppm signal holds both olefinic H of 1,4 units and the side-chain =CH of 3,4 and 1,2 units; this is corrected for. cis/trans 1,4 needs \xB9\xB3C."
+      };
+    }
     if (kind === "butadiene") {
       const vinylCH2 = A(5.08, 4.85) / 2;
       const olefin = A(5.65, 5.25);
@@ -2489,7 +2514,11 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     return null;
   }
   function repeatArea(spec, polymer) {
-    return Math.max(0, integrateRange(spec, polymer.signal.from, polymer.signal.to).area);
+    const A = (a, b) => Math.max(0, integrateRange(spec, a, b).area);
+    if (polymer.micro === "myrcene") {
+      return A(5.25, 4.95) + A(4.82, 4.6) / 2 + A(5.9, 5.55);
+    }
+    return A(polymer.signal.from, polymer.signal.to);
   }
 
   // macos/bridge/bridge.js

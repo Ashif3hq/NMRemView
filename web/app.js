@@ -222,7 +222,14 @@ function infoHTML(it) {
 // ---------- Polymer tools ----------
 function polyState(it) {
   if (!it.poly) {
-    const guess = NMR.POLYMERS.find((p) => it.result.suggestions.compounds.slice(0, 2).some((c) => c.compound.name.toLowerCase().includes(p.name.toLowerCase().split(' ')[0].replace('poly(', '')))) || NMR.POLYMERS[0];
+    // Take the best-ranked library match that is one of the polymer presets.
+    const key = (p) => p.name.toLowerCase().replace(/^poly\(?/, '').replace(/\)$/, '');
+    let guess = null;
+    for (const c of it.result.suggestions.compounds.slice(0, 3)) {
+      guess = NMR.POLYMERS.find((p) => c.compound.name.toLowerCase().includes(key(p)));
+      if (guess) break;
+    }
+    guess = guess || NMR.POLYMERS[0];
     it.poly = { polymer: guess.id, repeatSig: 'window', repeatH: guess.signal.nH, m0: +guess.m0.toFixed(2), end: 'custom', endSig: '', endH: 1, endCount: 1, endMass: 0, comps: [] };
   }
   return it.poly;

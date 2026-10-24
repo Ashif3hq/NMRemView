@@ -259,6 +259,7 @@ export const COMPOUNDS = [
   { name: 'Rutin (DMSO-d₆)', formula: 'C27H30O16', solvent: 'DMSO-d6', h: [[12.59, 's', 1], [7.55, 'm', 2], [6.84, 'd', 1], [6.39, 'd', 1], [6.19, 'd', 1], [5.34, 'd', 1], [4.38, 's', 1], [3.3, 'm', 10], [0.99, 'd', 3]], c: [177.4, 164.1, 161.2, 156.6, 156.4, 148.4, 144.8, 133.3, 121.6, 121.2, 116.3, 115.2, 104.0, 101.2, 100.8, 98.7, 93.6, 76.5, 75.9, 74.1, 72.0, 70.6, 70.4, 70.0, 68.3, 67.0, 17.7] },
   // Polymers (repeat unit, CDCl3).
   { name: 'cis-1,4-Polyisoprene (natural rubber)', formula: 'C5H8', polymer: true, h: [[5.12, 'br s', 1], [2.03, 'br s', 4], [1.68, 's', 3]], c: [135.2, 125.0, 32.2, 26.4, 23.4] },
+  { name: 'Polymyrcene', formula: 'C10H16', polymer: true, h: [[5.10, 'br s', 2], [2.02, 'br s', 8], [1.68, 's', 3], [1.60, 's', 3]], c: [139.2, 131.3, 124.9, 124.4, 37.1, 32.1, 28.4, 26.8, 25.8, 17.7] },
   { name: 'trans-1,4-Polyisoprene (gutta-percha)', formula: 'C5H8', polymer: true, h: [[5.12, 'br s', 1], [2.00, 'br s', 4], [1.60, 's', 3]], c: [134.9, 124.2, 39.7, 26.7, 16.0] },
   { name: '1,4-Polybutadiene', formula: 'C4H6', polymer: true, h: [[5.40, 'br s', 2], [2.06, 'br s', 4]], c: [130.0, 129.5, 32.7, 27.4] },
   { name: 'Polystyrene', formula: 'C8H8', polymer: true, h: [[7.06, 'm', 3], [6.57, 'm', 2], [1.84, 'm', 1], [1.42, 'm', 2]], c: [145.3, 127.9, 125.6, 43.5, 40.4] },

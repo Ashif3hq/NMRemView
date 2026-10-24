@@ -156,10 +156,12 @@ struct PolymerView: View {
 
     private func guessPolymer() {
         guard let lib = library else { return }
-        let names = result.compounds.prefix(2).map { $0.name.lowercased() }
-        for p in lib.polymers {
-            let key = p.name.lowercased().replacingOccurrences(of: "poly(", with: "").replacingOccurrences(of: "poly", with: "").replacingOccurrences(of: ")", with: "")
-            if names.contains(where: { $0.contains(key) }) { polymerId = p.id; repeatH = p.nH; m0 = (p.m0 * 100).rounded() / 100; return }
+        // Take the best-ranked library match that is one of the polymer presets.
+        for name in result.compounds.prefix(3).map({ $0.name.lowercased() }) {
+            for p in lib.polymers {
+                let key = p.name.lowercased().replacingOccurrences(of: "poly(", with: "").replacingOccurrences(of: "poly", with: "").replacingOccurrences(of: ")", with: "")
+                if name.contains(key) { polymerId = p.id; repeatH = p.nH; m0 = (p.m0 * 100).rounded() / 100; return }
+            }
         }
         if let p = lib.polymers.first(where: { $0.id == polymerId }) { repeatH = p.nH; m0 = (p.m0 * 100).rounded() / 100 }
     }

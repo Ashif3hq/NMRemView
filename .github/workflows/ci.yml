@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  core-and-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Regression tests on real spectra
+        run: npm test
+      - name: Build web trial
+        run: npm run build:web
+      - name: Check the macOS core bundle is up to date
+        run: |
+          npm run build:core
+          git diff --exit-code macos/NMRemView/Sources/NMRemView/Resources/nmrcore.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-trial
+          path: dist/web
+
+  macos-app:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build SwiftUI app (Apple silicon)
+        working-directory: macos/NMRemView
+        run: swift build -c release --arch arm64
+      - name: Package app binary
+        working-directory: macos/NMRemView
+        run: |
+          mkdir -p out
+          cp -R "$(swift build -c release --arch arm64 --show-bin-path)/NMRemView" out/
+          cp -R "$(swift build -c release --arch arm64 --show-bin-path)/NMRemView_NMRemView.bundle" out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NMRemView-macos-arm64
+          path: macos/NMRemView/out

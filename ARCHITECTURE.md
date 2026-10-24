@@ -44,10 +44,14 @@ threshold changes run in ~30 ms on a 64k-point spectrum.
 | Format | Status |
 | --- | --- |
 | Bruker TopSpin/XWIN-NMR folders (acqus, fid, pdata/1/procs, 1r/1i), also zipped | Done, verified on real 300–600 MHz data |
+| JEOL Delta `.jdf` (1D FID and spectra, digital filter, auto solvent referencing) | Done, verified on real 400/600 MHz ¹H and ¹³C data |
 | JCAMP-DX 4.24–6.0: XYDATA, NTUPLES spectra and FIDs, ASDF compression, PEAK TABLE | Done, verified (Bruker, Varian, Nanalysis, Oxford Instruments exports) |
 | Varian/Agilent VnmrJ `.fid` folders (procpar + fid) | Written, needs a real test file |
+| Magritek Spinsolve folders (acqu.par + data.1d / spectrum.1d) | Written, needs a real test file |
+| NMRPipe 1D `.fid` / `.ft` | Written, needs a real test file |
+| nmrML (open XML standard, zlib or plain) | Written, needs a real test file |
+| MestReNova `.mnova` | Closed format. Spectra embedded as JCAMP-DX (plain or zlib-compressed) are recovered; otherwise the app explains how to export JCAMP-DX from MestReNova. Needs sample files to go further. |
 | CSV/TXT two-column (ppm, intensity) | Done |
-| JEOL .jdf, Magritek, MestReNova .mnova | Planned (.mnova is proprietary; JCAMP export works today) |
 | 2D (COSY, HSQC, HMBC) | Detected and skipped; planned |
 
 ## Intelligence

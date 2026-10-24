@@ -261,20 +261,20 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     return (x) => x / (obsFreq || 1);
   }
   function readNtuples(records, h, base) {
-    const attr = {};
+    const attr2 = {};
     const start = records.findIndex((r) => r.label === "NTUPLES");
     for (let i = start + 1; i < records.length; i++) {
       const r = records[i];
       if (r.label === "PAGE" || r.label === "DATATABLE") break;
-      attr[r.label] = r.value.split(",").map((s) => s.trim());
+      attr2[r.label] = r.value.split(",").map((s) => s.trim());
     }
-    const symbols = (attr.SYMBOL || []).map((s) => s.toUpperCase());
+    const symbols = (attr2.SYMBOL || []).map((s) => s.toUpperCase());
     const iR = symbols.indexOf("R"), iI = symbols.indexOf("I"), iX = symbols.indexOf("X");
-    const factor = (k) => parseFloat((attr.FACTOR || [])[k]) || 1;
-    const first = (k) => parseFloat((attr.FIRST || [])[k]);
-    const last = (k) => parseFloat((attr.LAST || [])[k]);
-    const units = (attr.UNITS || []).map((u) => u.toUpperCase());
-    const dim = parseInt((attr.VARDIM || [])[iR >= 0 ? iR : 1], 10);
+    const factor = (k) => parseFloat((attr2.FACTOR || [])[k]) || 1;
+    const first = (k) => parseFloat((attr2.FIRST || [])[k]);
+    const last = (k) => parseFloat((attr2.LAST || [])[k]);
+    const units = (attr2.UNITS || []).map((u) => u.toUpperCase());
+    const dim = parseInt((attr2.VARDIM || [])[iR >= 0 ? iR : 1], 10);
     let re = null, im = null;
     for (const r of records) {
       if (r.label !== "DATATABLE") continue;
@@ -511,6 +511,130 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     };
   }
 
+  // core/inflate.js
+  var LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+  var LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  var DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+  var DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+  var CL_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+  function buildTree(lengths) {
+    const counts = new Uint16Array(16);
+    for (const l of lengths) counts[l]++;
+    counts[0] = 0;
+    const offs = new Uint16Array(16);
+    for (let i = 1; i < 16; i++) offs[i] = offs[i - 1] + counts[i - 1];
+    const symbols = new Uint16Array(lengths.length);
+    for (let i = 0; i < lengths.length; i++) if (lengths[i]) symbols[offs[lengths[i]]++] = i;
+    return { counts, symbols };
+  }
+  var FIXED_LIT = null;
+  var FIXED_DIST = null;
+  function fixedTrees() {
+    if (!FIXED_LIT) {
+      const l = new Uint8Array(288);
+      l.fill(8, 0, 144);
+      l.fill(9, 144, 256);
+      l.fill(7, 256, 280);
+      l.fill(8, 280, 288);
+      FIXED_LIT = buildTree(l);
+      FIXED_DIST = buildTree(new Uint8Array(30).fill(5));
+    }
+    return [FIXED_LIT, FIXED_DIST];
+  }
+  function inflateRaw(src, sizeHint = 0) {
+    let pos = 0, bit = 0, bitCount = 0;
+    let out = new Uint8Array(Math.max(1024, sizeHint || src.length * 4));
+    let o = 0;
+    const ensure = (n) => {
+      if (o + n <= out.length) return;
+      let len = out.length * 2;
+      while (len < o + n) len *= 2;
+      const next = new Uint8Array(len);
+      next.set(out);
+      out = next;
+    };
+    const bits = (n) => {
+      while (bitCount < n) {
+        if (pos >= src.length) throw new Error("Unexpected end of compressed data");
+        bit |= src[pos++] << bitCount;
+        bitCount += 8;
+      }
+      const v = bit & (1 << n) - 1;
+      bit >>>= n;
+      bitCount -= n;
+      return v;
+    };
+    const decode = (t) => {
+      let code = 0, first = 0, index = 0;
+      for (let len = 1; len < 16; len++) {
+        code |= bits(1);
+        const count = t.counts[len];
+        if (code - count < first) return t.symbols[index + (code - first)];
+        index += count;
+        first += count;
+        first <<= 1;
+        code <<= 1;
+      }
+      throw new Error("Invalid Huffman code");
+    };
+    let final = 0;
+    while (!final) {
+      final = bits(1);
+      const type = bits(2);
+      if (type === 0) {
+        bit = 0;
+        bitCount = 0;
+        const len = src[pos] | src[pos + 1] << 8;
+        pos += 4;
+        ensure(len);
+        out.set(src.subarray(pos, pos + len), o);
+        o += len;
+        pos += len;
+        continue;
+      }
+      let lit, dist;
+      if (type === 1) [lit, dist] = fixedTrees();
+      else if (type === 2) {
+        const hlit = bits(5) + 257, hdist = bits(5) + 1, hclen = bits(4) + 4;
+        const cl = new Uint8Array(19);
+        for (let i = 0; i < hclen; i++) cl[CL_ORDER[i]] = bits(3);
+        const clt = buildTree(cl);
+        const lens = new Uint8Array(hlit + hdist);
+        for (let i = 0; i < hlit + hdist; ) {
+          const sym = decode(clt);
+          if (sym < 16) lens[i++] = sym;
+          else if (sym === 16) {
+            const p = lens[i - 1];
+            for (let r = bits(2) + 3; r > 0; r--) lens[i++] = p;
+          } else if (sym === 17) i += bits(3) + 3;
+          else i += bits(7) + 11;
+        }
+        lit = buildTree(lens.subarray(0, hlit));
+        dist = buildTree(lens.subarray(hlit));
+      } else throw new Error("Invalid DEFLATE block");
+      for (; ; ) {
+        const sym = decode(lit);
+        if (sym === 256) break;
+        if (sym < 256) {
+          ensure(1);
+          out[o++] = sym;
+          continue;
+        }
+        const li = sym - 257;
+        const len = LEN_BASE[li] + bits(LEN_EXTRA[li]);
+        const di = decode(dist);
+        const d = DIST_BASE[di] + bits(DIST_EXTRA[di]);
+        ensure(len);
+        for (let k = 0; k < len; k++, o++) out[o] = out[o - d];
+      }
+    }
+    return out.subarray(0, o);
+  }
+  function inflateZlib(src) {
+    if (src.length < 2 || (src[0] & 15) !== 8 || (src[0] << 8 | src[1]) % 31 !== 0) throw new Error("Not a zlib stream");
+    return inflateRaw(src.subarray(2));
+  }
+
   // core/textformats.js
   function readText(text, name = "spectrum.txt") {
     const xs = [], ys = [];
@@ -541,6 +665,323 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     }
     if (!nucleus) nucleus = start - end > 40 ? "13C" : "1H";
     return finishSpectrum({ name, title: name, nucleus, frequency: frequency || (nucleus === "13C" ? 100 : 400), source: "Text/CSV", meta: {} }, out, null, start, end);
+  }
+
+  // core/jeol.js
+  var PREFIX = { "-8": 24, "-7": 21, "-6": 18, "-5": 15, "-4": 12, "-3": 9, "-2": 6, "-1": 3, 0: 0, 1: -3, 2: -6, 3: -9, 4: -12, 5: -15, 6: -18, 7: -21 };
+  var UNITS = { 13: "Hz", 26: "ppm", 28: "s" };
+  function isJeol(bytes) {
+    return bytes.length > 1300 && String.fromCharCode(...bytes.subarray(0, 8)).startsWith("JEOL.NMR");
+  }
+  function readJeol(bytes, name = "spectrum.jdf") {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const little = dv.getInt8(8) === 1;
+    const dims = dv.getUint8(12);
+    const typeByte = dv.getUint8(14);
+    const float32 = typeByte >> 6 === 1;
+    const format = typeByte & 63;
+    if (format !== 1 || dims !== 1) throw new Error("Only 1D JEOL data is supported for now");
+    const axisType = dv.getUint8(24);
+    const unitBase = UNITS[dv.getInt8(33)] || "";
+    const points = dv.getUint32(176);
+    const axisStart = dv.getFloat64(272), axisStop = dv.getFloat64(336);
+    const baseFreq = dv.getFloat64(1064);
+    const paramStart = dv.getUint32(1212);
+    const dataStart = dv.getUint32(1284);
+    const str = (o, n) => {
+      let s = "";
+      for (let i = 0; i < n; i++) {
+        const c = bytes[o + i];
+        if (c) s += String.fromCharCode(c);
+      }
+      return s;
+    };
+    const title = str(48, 124).trim();
+    const params = {};
+    const high = dv.getUint32(paramStart + 8, little);
+    for (let i = 0; i <= high; i++) {
+      const o = paramStart + 16 + i * 64;
+      if (o + 64 > bytes.length) break;
+      const prefix = PREFIX[dv.getInt8(o + 6) >> 4] || 0;
+      const vtype = dv.getInt32(o + 32, little);
+      const pname = str(o + 36, 28).replace(/\s+$/, "").toLowerCase();
+      let value2;
+      if (vtype === 0) value2 = str(o + 16, 16).trim();
+      else if (vtype === 1 || vtype === 4) value2 = dv.getInt32(o + 16, little);
+      else if (vtype === 2) value2 = dv.getFloat64(o + 16, little) * Math.pow(10, prefix);
+      params[pname] = value2;
+    }
+    const read = (off, n) => {
+      const a = new Float64Array(n);
+      for (let i = 0; i < n; i++) a[i] = float32 ? dv.getFloat32(off + i * 4, little) : dv.getFloat64(off + i * 8, little);
+      return a;
+    };
+    const size = float32 ? 4 : 8;
+    const re = read(dataStart, points);
+    const im = axisType === 3 ? read(dataStart + points * size, points) : null;
+    const nucleus = String(params.x_domain || "1H").replace(/[^0-9A-Za-z]/g, "");
+    const freq = params.x_freq ? params.x_freq / 1e6 : baseFreq;
+    const meta = { pulseSequence: params.experiment, scans: params.scans, temperature: params.temp_get, origin: "JEOL", date: void 0 };
+    const base = { name, title: params.sample_id || title || name, nucleus, frequency: freq, solvent: params.solvent, meta, source: "JEOL Delta" };
+    if (unitBase === "s") {
+      const sw = params.x_sweep;
+      const used = Math.min(points, params.x_points || points);
+      return {
+        ...base,
+        fid: {
+          re: re.subarray(0, used),
+          im: (im || new Float64Array(points)).subarray(0, used),
+          sw,
+          centerPpm: params.x_offset || 0,
+          grpdly: jeolDigitalFilter(params),
+          origin: "jeol",
+          // JEOL records the opposite quadrature sense to Bruker.
+          reverse: true
+        }
+      };
+    }
+    let start = axisStart, stop = axisStop;
+    if (unitBase === "Hz") {
+      start /= freq;
+      stop /= freq;
+    }
+    const real = Float64Array.from(re), imag = im ? Float64Array.from(im) : null;
+    if (start < stop) {
+      real.reverse();
+      if (imag) imag.reverse();
+      [start, stop] = [stop, start];
+    }
+    return { ...base, real, imag, ppmStart: start, ppmEnd: stop };
+  }
+  function jeolDigitalFilter(p) {
+    const orders = String(p.orders || "").replace(/\s/g, ""), factors = String(p.factors || "").replace(/\s/g, "");
+    if (!orders || !factors || !p.x_sweep || !p.x_acq_time || !p.x_points) return 0;
+    const n = parseInt(orders[0], 10);
+    if (!n) return 0;
+    const w = (orders.length - 1) / n;
+    const f = [];
+    for (let i = 0; i < n; i++) f.push(parseInt(factors[i], 10));
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      let prod = 1;
+      for (let j = i; j < n; j++) prod *= f[j];
+      s += (parseInt(orders.slice(1 + i * w, 1 + (i + 1) * w), 10) - 1) / prod;
+    }
+    s /= 2;
+    return s / p.x_sweep / p.x_acq_time * (p.x_points - 1);
+  }
+
+  // core/nmrpipe.js
+  function isNmrPipe(bytes) {
+    if (bytes.length < 2048 + 16) return false;
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return Math.abs(dv.getFloat32(8, true) - 2.345) < 1e-3 || Math.abs(dv.getFloat32(8, false) - 2.345) < 1e-3;
+  }
+  function readNmrPipe(bytes, name = "spectrum.ft") {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const le = Math.abs(dv.getFloat32(8, true) - 2.345) < 1e-3;
+    const h = (i) => dv.getFloat32(i * 4, le);
+    if (Math.round(h(9)) !== 1) throw new Error("Only 1D NMRPipe files are supported for now");
+    const size = Math.round(h(99));
+    const complex = Math.round(h(106)) === 0;
+    const sw = h(100), obs = h(119), orig = h(101), car = h(66);
+    const ft = Math.round(h(220)) === 1;
+    let label = "";
+    for (let i = 0; i < 8; i++) {
+      const c = bytes[16 * 4 + i];
+      if (c) label += String.fromCharCode(c);
+    }
+    const read = (off) => {
+      const a = new Float64Array(size);
+      for (let i = 0; i < size; i++) a[i] = dv.getFloat32(2048 + (off + i) * 4, le);
+      return a;
+    };
+    const re = read(0), im = complex ? read(size) : null;
+    const nucleus = label.trim() || "1H";
+    const base = { name, title: name, nucleus, frequency: obs, solvent: void 0, meta: { origin: "NMRPipe" }, source: "NMRPipe" };
+    if (!ft) return { ...base, fid: { re, im: im || new Float64Array(size), sw, centerPpm: car, grpdly: 0, origin: "nmrpipe" } };
+    return { ...base, real: re, imag: im, ppmStart: (orig + sw * (size - 1) / size) / obs, ppmEnd: orig / obs };
+  }
+
+  // core/nmrml.js
+  function b64(s) {
+    const T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const m = new Uint8Array(128);
+    for (let i = 0; i < 64; i++) m[T.charCodeAt(i)] = i;
+    s = s.replace(/[^A-Za-z0-9+/]/g, "");
+    const out = new Uint8Array(Math.floor(s.length * 3 / 4));
+    let o = 0;
+    for (let i = 0; i < s.length; i += 4) {
+      const n = m[s.charCodeAt(i)] << 18 | m[s.charCodeAt(i + 1)] << 12 | m[s.charCodeAt(i + 2)] << 6 | m[s.charCodeAt(i + 3)];
+      out[o++] = n >> 16 & 255;
+      if (i + 2 < s.length) out[o++] = n >> 8 & 255;
+      if (i + 3 < s.length) out[o++] = n & 255;
+    }
+    return out.subarray(0, o);
+  }
+  function attr(tag, name) {
+    const m = tag && tag.match(new RegExp(name + '="([^"]*)"'));
+    return m ? m[1] : void 0;
+  }
+  function binary(xml, element) {
+    const m = xml.match(new RegExp("<" + element + "([^>]*)>([^<]*)</" + element + ">"));
+    if (!m) return null;
+    let bytes = b64(m[2]);
+    if (attr(m[1], "compressed") === "true") bytes = inflateZlib(bytes);
+    const fmt = (attr(m[1], "byteFormat") || "complex128").toLowerCase();
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const size = /64/.test(fmt) && !/128/.test(fmt) ? 4 : 8;
+    const isInt = /int/.test(fmt);
+    const n = Math.floor(bytes.length / size);
+    const vals = new Float64Array(n);
+    for (let i = 0; i < n; i++) vals[i] = isInt ? size === 8 ? Number(dv.getBigInt64(i * 8, true)) : dv.getInt32(i * 4, true) : size === 8 ? dv.getFloat64(i * 8, true) : dv.getFloat32(i * 4, true);
+    return vals;
+  }
+  var value = (xml, el) => {
+    const m = xml.match(new RegExp("<" + el + '[^>]*value="([^"]*)"'));
+    return m ? parseFloat(m[1]) : void 0;
+  };
+  function readNmrML(text, name = "spectrum.nmrML") {
+    const nuc = (text.match(/<acquisitionNucleus[^>]*name="([^"]*)"/) || [])[1] || "1H";
+    const freq = value(text, "effectiveExcitationField") || value(text, "irradiationFrequency") / 1e6 || 400;
+    const sw = value(text, "sweepWidth");
+    const solvent = (text.match(/<fieldFrequencyLock[^>]*fieldFrequencyLockName="([^"]*)"/) || [])[1];
+    const base = { name, title: name, nucleus: nuc.replace(/[^0-9A-Za-z]/g, ""), frequency: freq, solvent, meta: { origin: "nmrML" }, source: "nmrML" };
+    const spec = binary(text, "spectrumDataArray");
+    if (spec) {
+      const x = text.match(/<xAxis[^>]*>/);
+      const start = parseFloat(attr(x && x[0], "startValue")), end = parseFloat(attr(x && x[0], "endValue"));
+      const n2 = spec.length / 2;
+      const re2 = new Float64Array(n2), im2 = new Float64Array(n2);
+      for (let i = 0; i < n2; i++) {
+        re2[i] = spec[2 * i];
+        im2[i] = spec[2 * i + 1];
+      }
+      let a = isNaN(start) ? 12 : start, b = isNaN(end) ? -1 : end;
+      if (a < b) {
+        re2.reverse();
+        im2.reverse();
+        [a, b] = [b, a];
+      }
+      return { ...base, real: re2, imag: im2, ppmStart: a, ppmEnd: b };
+    }
+    const fid = binary(text, "fidData");
+    if (!fid) throw new Error("nmrML file has no FID or spectrum data");
+    const n = fid.length / 2;
+    const re = new Float64Array(n), im = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      re[i] = fid[2 * i];
+      im[i] = fid[2 * i + 1];
+    }
+    const offset = value(text, "irradiationFrequencyOffset");
+    return { ...base, fid: { re, im, sw: sw || 1, centerPpm: offset !== void 0 ? offset / freq : 4.7, grpdly: 0, origin: "nmrml" } };
+  }
+
+  // core/magritek.js
+  function parseAcquPar(text) {
+    const out = {};
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(/^\s*([^=]+?)\s*=\s*(.*)$/);
+      if (!m) continue;
+      const v = m[2].trim().replace(/^"|"$/g, "");
+      out[m[1]] = isNaN(Number(v)) || v === "" ? v : Number(v);
+    }
+    return out;
+  }
+  function read1d(bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const xDim = dv.getInt32(16, true);
+    const rest = bytes.length - 32;
+    let axis = null, off = 32;
+    if (rest === xDim * 4 + xDim * 8) {
+      axis = new Float64Array(xDim);
+      for (let i = 0; i < xDim; i++) axis[i] = dv.getFloat32(32 + i * 4, true);
+      off = 32 + xDim * 4;
+    } else if (rest === xDim * 16) {
+      axis = new Float64Array(xDim);
+      for (let i = 0; i < xDim; i++) axis[i] = dv.getFloat32(32 + i * 8, true);
+      off = 32 + xDim * 8;
+    }
+    const re = new Float64Array(xDim), im = new Float64Array(xDim);
+    for (let i = 0; i < xDim; i++) {
+      re[i] = dv.getFloat32(off + i * 8, true);
+      im[i] = dv.getFloat32(off + i * 8 + 4, true);
+    }
+    return { axis, re, im };
+  }
+  function readMagritek(files, name = "spinsolve") {
+    const par = parseAcquPar(new TextDecoder("latin1").decode(files.get("acqu.par")));
+    const freq = par.b1Freq || par.Frequency || 43;
+    const nucleus = String(par.rxChannel || "1H").replace(/[^0-9A-Za-z]/g, "");
+    const base = {
+      name,
+      title: par.Sample || par.Protocol || name,
+      nucleus,
+      frequency: freq,
+      solvent: par.Solvent,
+      meta: { pulseSequence: par.Protocol, scans: par.nrScans, origin: "Magritek Spinsolve", date: par.startTime },
+      source: "Magritek Spinsolve"
+    };
+    let out = { ...base };
+    const spec = files.get("spectrum.1d");
+    if (spec) {
+      const { axis, re, im } = read1d(spec);
+      let a = axis ? axis[0] : 12, b = axis ? axis[axis.length - 1] : -1;
+      if (axis && Math.abs(a) > 500) {
+        a /= freq;
+        b /= freq;
+      }
+      const R = Float64Array.from(re), I = Float64Array.from(im);
+      if (a < b) {
+        R.reverse();
+        I.reverse();
+        [a, b] = [b, a];
+      }
+      out = { ...out, real: R, imag: I, ppmStart: a, ppmEnd: b };
+    }
+    const fid = files.get("data.1d");
+    if (fid) {
+      const { re, im } = read1d(fid);
+      const sw = (par.bandwidth || 5) * 1e3;
+      const low = par.lowestFrequency !== void 0 ? par.lowestFrequency / freq : -sw / freq / 2 + 5;
+      out.fid = { re, im, sw, centerPpm: low + sw / freq / 2, grpdly: 0, origin: "magritek" };
+    }
+    if (!out.fid && !out.real) throw new Error("Spinsolve folder has no data.1d or spectrum.1d");
+    return out;
+  }
+
+  // core/mnova.js
+  var dec2 = (b) => new TextDecoder("latin1").decode(b);
+  function readMnova(bytes, name = "document.mnova") {
+    const found = [];
+    const tryText = (u8) => {
+      const s = dec2(u8);
+      let i = s.indexOf("##TITLE=");
+      while (i >= 0 && found.length < 20) {
+        const end = s.indexOf("##END=", i);
+        if (end < 0) break;
+        try {
+          for (const ds of readJcamp(s.slice(i, end + 8), name)) found.push({ ...ds, source: "MestReNova (embedded JCAMP-DX)" });
+        } catch (e) {
+        }
+        i = s.indexOf("##TITLE=", end);
+      }
+    };
+    tryText(bytes);
+    let tried = 0;
+    for (let p = 0; p < bytes.length - 2 && tried < 400 && !found.length; p++) {
+      if (bytes[p] !== 120 || bytes[p + 1] !== 156 && bytes[p + 1] !== 218 && bytes[p + 1] !== 1) continue;
+      tried++;
+      try {
+        const inner = inflateZlib(bytes.subarray(p));
+        if (inner.length > 64) tryText(inner);
+      } catch (e) {
+      }
+    }
+    if (!found.length) {
+      throw new Error("This .mnova document stores its spectra in MestReNova's closed format. In MestReNova choose File \u203A Save As\u2026 \u203A JCAMP-DX (*.jdx) and open that, or open the original instrument folder.");
+    }
+    return found;
   }
 
   // core/loader.js
@@ -575,11 +1016,29 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       }
       markUsed(all, dir, used);
     }
+    const magDirs = [...all.keys()].filter((p) => /(^|\/)acqu\.par$/.test(p)).map((p) => p.replace(/acqu\.par$/, ""));
+    for (const dir of magDirs) {
+      if (!all.has(dir + "data.1d") && !all.has(dir + "spectrum.1d")) continue;
+      try {
+        datasets.push(normalise(readMagritek(subset(all, dir), nameFor(dir, "Spinsolve"))));
+      } catch (e) {
+        warnings.push(`${dir}: ${e.message}`);
+      }
+      for (const f of ["acqu.par", "data.1d", "spectrum.1d"]) used.add(dir + f);
+    }
     for (const [path, data] of all) {
       if (used.has(path)) continue;
       const base = path.split("/").pop();
       try {
-        if (JCAMP_EXT.test(path)) {
+        if (/\.mnova$/i.test(path)) {
+          for (const ds of readMnova(data, base)) datasets.push(normalise(ds));
+        } else if (/\.jdf$/i.test(path) || isJeol(data)) {
+          datasets.push(normalise(readJeol(data, base)));
+        } else if (/\.nmrml$/i.test(path) || /\.xml$/i.test(path) && /<nmrML/.test(new TextDecoder("latin1").decode(data.subarray(0, 2e3)))) {
+          datasets.push(normalise(readNmrML(new TextDecoder().decode(data), base)));
+        } else if (isNmrPipe(data)) {
+          datasets.push(normalise(readNmrPipe(data, base)));
+        } else if (JCAMP_EXT.test(path) || data.length > 8 && data[0] === 35 && data[1] === 35) {
           const text = new TextDecoder("latin1").decode(data);
           for (const ds of readJcamp(text, base)) datasets.push(normalise(ds));
         } else if (TEXT_EXT.test(path) && !/^(audit|title|integrals|peaklist|format)/i.test(base)) {
@@ -590,7 +1049,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         warnings.push(`${base}: ${e.message}`);
       }
     }
-    if (!datasets.length && !warnings.length) warnings.push("No supported NMR data found. Supported: Bruker folders/zips, Varian .fid folders, JCAMP-DX (.jdx/.dx), CSV/TXT (ppm, intensity).");
+    if (!datasets.length && !warnings.length) warnings.push("No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova, when it embeds open data), CSV/TXT.");
     return { datasets, warnings };
   }
   function subset(all, dir) {
@@ -622,6 +1081,8 @@ if (typeof globalThis.TextDecoder === 'undefined') {
   function canonicalNucleus(n) {
     if (!n) return "1H";
     const s = String(n).replace(/[^0-9A-Za-z]/g, "");
+    const named = { proton: "1H", hydrogen: "1H", carbon: "13C", carbon13: "13C", fluorine: "19F", fluorine19: "19F", phosphorus: "31P", phosphorus31: "31P", nitrogen15: "15N", silicon29: "29Si", deuterium: "2H" };
+    if (named[s.toLowerCase()]) return named[s.toLowerCase()];
     const m = s.match(/^(\d+)([A-Za-z]+)$/) || s.match(/^([A-Za-z]+)(\d+)$/);
     if (!m) return s;
     const [num2, el] = /^\d/.test(m[1]) ? [m[1], m[2]] : [m[2], m[1]];
@@ -1399,6 +1860,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     { name: "Butan-2-one", formula: "C4H8O", h: [[2.44, "q", 2], [2.14, "s", 3], [1.06, "t", 3]], c: [209.3, 36.9, 29.4, 7.9] },
     { name: "Propanal", formula: "C3H6O", h: [[9.79, "t", 1], [2.46, "qd", 2], [1.11, "t", 3]], c: [203, 37.3, 6] },
     { name: "Cytisine", formula: "C11H14N2O", h: [[7.29, "dd", 1], [6.43, "d", 1], [5.98, "d", 1], [4.09, "d", 1], [3.89, "dd", 1], [3, "m", 4], [2.31, "m", 1], [1.93, "m", 2]], c: [163.6, 151.1, 138.7, 116.7, 104.9, 53.7, 52.8, 49.9, 35.5, 27.6, 26.2] },
+    { name: "Rutin (DMSO-d\u2086)", formula: "C27H30O16", solvent: "DMSO-d6", h: [[12.59, "s", 1], [7.55, "m", 2], [6.84, "d", 1], [6.39, "d", 1], [6.19, "d", 1], [5.34, "d", 1], [4.38, "s", 1], [3.3, "m", 10], [0.99, "d", 3]], c: [177.4, 164.1, 161.2, 156.6, 156.4, 148.4, 144.8, 133.3, 121.6, 121.2, 116.3, 115.2, 104, 101.2, 100.8, 98.7, 93.6, 76.5, 75.9, 74.1, 72, 70.6, 70.4, 70, 68.3, 67, 17.7] },
     { name: "Strychnine", formula: "C21H22N2O2", h: [[8.09, "d", 1], [7.24, "m", 2], [7.09, "t", 1], [5.89, "m", 1], [4.28, "dt", 1], [4.13, "m", 1], [4.06, "dd", 1], [3.92, "d", 1], [3.85, "d", 1], [3.71, "m", 1], [3.17, "m", 2], [2.88, "m", 1], [2.7, "m", 2], [2.35, "m", 1], [1.89, "m", 2], [1.47, "m", 1], [1.27, "m", 1]], c: [169.3, 142.2, 140.5, 132.7, 128.6, 127.3, 124.2, 122.2, 116.2, 77.6, 64.6, 60.3, 60.1, 52.7, 52, 50.3, 48.2, 42.5, 42.4, 31.6, 26.9] }
   ];
   function searchReference(query, nucleus) {
@@ -1602,7 +2064,9 @@ if (typeof globalThis.TextDecoder === 'undefined') {
   function journalReport(spec, signals) {
     const nucleus = /13C/.test(spec.nucleus) ? "13C" : "1H";
     const solvent = findSolvent(spec.solvent);
-    const head = `${nucleus === "13C" ? "\xB9\xB3C" : "\xB9H"} NMR (${Math.round(spec.frequency || 0)} MHz, ${solvent ? solvent.id : spec.solvent || "solvent"}) \u03B4 `;
+    const sup = (t) => t.replace(/\d/g, (d) => "\u2070\xB9\xB2\xB3\u2074\u2075\u2076\u2077\u2078\u2079"[d]);
+    const iso = String(spec.nucleus || "1H").match(/^(\d+)([A-Za-z]+)$/);
+    const head = `${iso ? sup(iso[1]) + iso[2] : spec.nucleus} NMR (${Math.round(spec.frequency || 0)} MHz, ${solvent ? solvent.id : spec.solvent || "solvent"}) \u03B4 `;
     const list = signals.filter((s) => !s.minor && !(s.flag && s.flag.kind === "solvent")).sort((a, b) => b.ppm - a.ppm);
     if (nucleus === "13C") return head + list.map((s) => s.ppm.toFixed(1)).join(", ") + ".";
     return head + list.map((s) => {
@@ -1646,6 +2110,8 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       formula: "",
       totalH: null,
       manualRegions: [],
+      // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
+      autoReference: !!ds.fid && ["jeol", "nmrpipe", "magritek", "nmrml"].includes(ds.fid.origin),
       excluded: []
     };
     let fftCache = null;
@@ -1686,7 +2152,17 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       };
       const fi = params.formula ? formulaInfo(params.formula) : null;
       const totalH = params.totalH || fi && fi.totalH || null;
-      const a = analyse(spec, { snr: params.snr });
+      let a = analyse(spec, { snr: params.snr });
+      if (params.autoReference) {
+        params.autoReference = false;
+        const d = solventOffset(spec, a.peaks);
+        if (d) {
+          params.referenceShift += d;
+          spec.ppmStart += d;
+          spec.ppmEnd += d;
+          a = analyse(spec, { snr: params.snr });
+        }
+      }
       let signals = a.multiplets;
       if (params.manualRegions.length && /1H/.test(spec.nucleus)) {
         const ax = ppmAxis(spec);
@@ -1729,14 +2205,28 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       run
     };
   }
+  function solventOffset(spec, peaks) {
+    const sol = findSolvent(spec.solvent);
+    const is13 = /13C/.test(spec.nucleus);
+    const target = sol && (is13 ? sol.c[0] : /1H/.test(spec.nucleus) ? sol.h[0] : void 0);
+    if (target === void 0) return 0;
+    const win = is13 ? 1.5 : 0.12;
+    const near = peaks.filter((p) => Math.abs(p.ppm - target) < win);
+    if (!near.length) return 0;
+    const top = near.reduce((b, p) => p.height > b.height ? p : b);
+    const span = is13 ? 0.8 : 0.03;
+    const group = near.filter((p) => Math.abs(p.ppm - top.ppm) < span && p.height > top.height * 0.1);
+    const centre = (Math.max(...group.map((p) => p.ppm)) + Math.min(...group.map((p) => p.ppm))) / 2;
+    return target - centre;
+  }
 
   // macos/bridge/bridge.js
   var sessions = /* @__PURE__ */ new Map();
-  function fromBase64(b64) {
+  function fromBase64(b642) {
     const T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const map = new Uint8Array(128);
     for (let i = 0; i < T.length; i++) map[T.charCodeAt(i)] = i;
-    const s = b64.replace(/[^A-Za-z0-9+/]/g, "");
+    const s = b642.replace(/[^A-Za-z0-9+/]/g, "");
     const out = new Uint8Array(Math.floor(s.length * 3 / 4));
     let o = 0;
     for (let i = 0; i < s.length; i += 4) {

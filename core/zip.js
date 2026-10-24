@@ -1,4 +1,5 @@
-// Minimal ZIP reader (stored + deflate) using the platform DecompressionStream.
+// Minimal ZIP reader (stored + deflate). Uses DecompressionStream when present, else pure JS.
+import { inflateRaw } from './inflate.js';
 
 export async function unzip(bytes) {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -30,6 +31,7 @@ export async function unzip(bytes) {
 }
 
 async function inflate(data) {
+  if (typeof DecompressionStream === 'undefined') return inflateRaw(data);
   const ds = new DecompressionStream('deflate-raw');
   const stream = new Blob([data]).stream().pipeThrough(ds);
   return new Uint8Array(await new Response(stream).arrayBuffer());

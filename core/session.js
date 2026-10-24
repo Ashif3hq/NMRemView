@@ -3,6 +3,7 @@
 import { transformFid, autoPhase, applyPhase, baselineCorrect, defaultProcessing, ppmAxis } from './processing.js';
 import { analyse, describeMultiplet, applyIntegralUnit } from './analysis.js';
 import { suggest, journalReport, formulaInfo } from './assign.js';
+import { findSolvent } from './database.js';
 
 export function createSession(ds) {
   const fromFid = !!ds.fid && !ds.rawReal;
@@ -16,6 +17,8 @@ export function createSession(ds) {
     formula: '',
     totalH: null,
     manualRegions: [],
+    // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
+    autoReference: !!ds.fid && ['jeol', 'nmrpipe', 'magritek', 'nmrml'].includes(ds.fid.origin),
     excluded: [],
   };
   let fftCache = null;
@@ -51,7 +54,16 @@ export function createSession(ds) {
     };
     const fi = params.formula ? formulaInfo(params.formula) : null;
     const totalH = params.totalH || (fi && fi.totalH) || null;
-    const a = analyse(spec, { snr: params.snr });
+    let a = analyse(spec, { snr: params.snr });
+    if (params.autoReference) {
+      params.autoReference = false;
+      const d = solventOffset(spec, a.peaks);
+      if (d) {
+        params.referenceShift += d;
+        spec.ppmStart += d; spec.ppmEnd += d;
+        a = analyse(spec, { snr: params.snr });
+      }
+    }
     let signals = a.multiplets;
     // Manual integral regions replace any automatic regions they overlap.
     if (params.manualRegions.length && /1H/.test(spec.nucleus)) {
@@ -90,4 +102,21 @@ export function createSession(ds) {
     },
     run,
   };
+}
+
+// Offset that moves the solvent residual signal onto its literature shift (0 if not found).
+function solventOffset(spec, peaks) {
+  const sol = findSolvent(spec.solvent);
+  const is13 = /13C/.test(spec.nucleus);
+  const target = sol && (is13 ? sol.c[0] : /1H/.test(spec.nucleus) ? sol.h[0] : undefined);
+  if (target === undefined) return 0;
+  const win = is13 ? 1.5 : 0.12;
+  const near = peaks.filter((p) => Math.abs(p.ppm - target) < win);
+  if (!near.length) return 0;
+  // Use the tallest line and its multiplet partners (CDCl3 triplet, DMSO septet, CD3OD septet).
+  const top = near.reduce((b, p) => (p.height > b.height ? p : b));
+  const span = is13 ? 0.8 : 0.03;
+  const group = near.filter((p) => Math.abs(p.ppm - top.ppm) < span && p.height > top.height * 0.1);
+  const centre = (Math.max(...group.map((p) => p.ppm)) + Math.min(...group.map((p) => p.ppm))) / 2;
+  return target - centre;
 }

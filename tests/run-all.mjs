@@ -7,6 +7,7 @@ const cases = [
   { file: 'web/samples/ibuprofen-13c.zip', expect: { compound: 'Ibuprofen', report: ['180.8', '45.1', '18.1'] } },
   { file: 'web/samples/aspirin-1h.zip', expect: { compound: 'Aspirin (acetylsalicylic acid)', report: ['2.29 (s'] } },
   { file: 'web/samples/strychnine-1h.zip', expect: { compound: 'Strychnine' } },
+  { file: 'web/samples/rutin-13c.jdf', expect: { compound: 'Rutin (DMSO-d₆)', report: ['177.4', '17.7'] } },
   { file: 'web/samples/cytisine-1h.jdx', expect: { compound: 'Cytisine' } },
 ];
 let fail = 0;

@@ -1,2 +1,2 @@
 Example datasets from the MIT-licensed cheminfo test collections
-(`bruker-data-test` and `jcamp-data-test` on npm, © cheminfo).
+(`bruker-data-test`, `jcamp-data-test` and `jeol-data-test` on npm, © cheminfo).

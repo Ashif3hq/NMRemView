@@ -183,7 +183,9 @@ export function suggest(spec, analysis, opts = {}) {
 export function journalReport(spec, signals) {
   const nucleus = /13C/.test(spec.nucleus) ? '13C' : '1H';
   const solvent = findSolvent(spec.solvent);
-  const head = `${nucleus === '13C' ? '¹³C' : '¹H'} NMR (${Math.round(spec.frequency || 0)} MHz, ${solvent ? solvent.id : spec.solvent || 'solvent'}) δ `;
+  const sup = (t) => t.replace(/\d/g, (d) => '⁰¹²³⁴⁵⁶⁷⁸⁹'[d]);
+  const iso = String(spec.nucleus || '1H').match(/^(\d+)([A-Za-z]+)$/);
+  const head = `${iso ? sup(iso[1]) + iso[2] : spec.nucleus} NMR (${Math.round(spec.frequency || 0)} MHz, ${solvent ? solvent.id : spec.solvent || 'solvent'}) δ `;
   const list = signals.filter((s) => !s.minor && !(s.flag && s.flag.kind === 'solvent')).sort((a, b) => b.ppm - a.ppm);
   if (nucleus === '13C') return head + list.map((s) => s.ppm.toFixed(1)).join(', ') + '.';
   return head + list.map((s) => {

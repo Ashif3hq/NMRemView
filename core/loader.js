@@ -5,6 +5,11 @@ import { readBruker } from './bruker.js';
 import { readVarian } from './varian.js';
 import { unzip } from './zip.js';
 import { readText } from './textformats.js';
+import { isJeol, readJeol } from './jeol.js';
+import { isNmrPipe, readNmrPipe } from './nmrpipe.js';
+import { readNmrML } from './nmrml.js';
+import { readMagritek } from './magritek.js';
+import { readMnova } from './mnova.js';
 
 const JCAMP_EXT = /\.(jdx|dx|jcamp|jcm)$/i;
 const TEXT_EXT = /\.(csv|tsv|txt|asc|xy)$/i;
@@ -53,11 +58,28 @@ export function loadExpanded(all) {
     markUsed(all, dir, used);
   }
 
+  // Magritek Spinsolve: directories holding acqu.par with data.1d / spectrum.1d.
+  const magDirs = [...all.keys()].filter((p) => /(^|\/)acqu\.par$/.test(p)).map((p) => p.replace(/acqu\.par$/, ''));
+  for (const dir of magDirs) {
+    if (!all.has(dir + 'data.1d') && !all.has(dir + 'spectrum.1d')) continue;
+    try { datasets.push(normalise(readMagritek(subset(all, dir), nameFor(dir, 'Spinsolve')))); }
+    catch (e) { warnings.push(`${dir}: ${e.message}`); }
+    for (const f of ['acqu.par', 'data.1d', 'spectrum.1d']) used.add(dir + f);
+  }
+
   for (const [path, data] of all) {
     if (used.has(path)) continue;
     const base = path.split('/').pop();
     try {
-      if (JCAMP_EXT.test(path)) {
+      if (/\.mnova$/i.test(path)) {
+        for (const ds of readMnova(data, base)) datasets.push(normalise(ds));
+      } else if (/\.jdf$/i.test(path) || isJeol(data)) {
+        datasets.push(normalise(readJeol(data, base)));
+      } else if (/\.nmrml$/i.test(path) || (/\.xml$/i.test(path) && /<nmrML/.test(new TextDecoder('latin1').decode(data.subarray(0, 2000))))) {
+        datasets.push(normalise(readNmrML(new TextDecoder().decode(data), base)));
+      } else if (isNmrPipe(data)) {
+        datasets.push(normalise(readNmrPipe(data, base)));
+      } else if (JCAMP_EXT.test(path) || (data.length > 8 && data[0] === 0x23 && data[1] === 0x23)) {
         const text = new TextDecoder('latin1').decode(data);
         for (const ds of readJcamp(text, base)) datasets.push(normalise(ds));
       } else if (TEXT_EXT.test(path) && !/^(audit|title|integrals|peaklist|format)/i.test(base)) {
@@ -66,7 +88,7 @@ export function loadExpanded(all) {
       }
     } catch (e) { warnings.push(`${base}: ${e.message}`); }
   }
-  if (!datasets.length && !warnings.length) warnings.push('No supported NMR data found. Supported: Bruker folders/zips, Varian .fid folders, JCAMP-DX (.jdx/.dx), CSV/TXT (ppm, intensity).');
+  if (!datasets.length && !warnings.length) warnings.push('No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova, when it embeds open data), CSV/TXT.');
   return { datasets, warnings };
 }
 
@@ -96,6 +118,8 @@ export function normalise(ds) {
 export function canonicalNucleus(n) {
   if (!n) return '1H';
   const s = String(n).replace(/[^0-9A-Za-z]/g, '');
+  const named = { proton: '1H', hydrogen: '1H', carbon: '13C', carbon13: '13C', fluorine: '19F', fluorine19: '19F', phosphorus: '31P', phosphorus31: '31P', nitrogen15: '15N', silicon29: '29Si', deuterium: '2H' };
+  if (named[s.toLowerCase()]) return named[s.toLowerCase()];
   const m = s.match(/^(\d+)([A-Za-z]+)$/) || s.match(/^([A-Za-z]+)(\d+)$/);
   if (!m) return s;
   const [num, el] = /^\d/.test(m[1]) ? [m[1], m[2]] : [m[2], m[1]];

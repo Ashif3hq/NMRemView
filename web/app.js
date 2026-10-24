@@ -9,6 +9,7 @@ const SAMPLES = [
   { file: 'samples/ibuprofen-13c.zip.b64.txt', label: 'Ibuprofen ¹³C · Bruker FID, 151 MHz' },
   { file: 'samples/aspirin-1h.zip.b64.txt', label: 'Aspirin ¹H · Bruker FID, 300 MHz' },
   { file: 'samples/strychnine-1h.zip.b64.txt', label: 'Strychnine ¹H · Bruker, 400 MHz' },
+  { file: 'samples/rutin-13c.jdf.b64.txt', label: 'Rutin ¹³C · JEOL Delta FID, 101 MHz' },
   { file: 'samples/cytisine-1h.jdx', label: 'Cytisine ¹H · JCAMP-DX, 600 MHz' },
   { file: 'samples/benchtop-60mhz-1h.jdx', label: 'Benchtop ¹H · JCAMP FID, 60 MHz' },
 ];

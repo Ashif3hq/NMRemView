@@ -182,7 +182,7 @@ details td.mono { white-space: nowrap; }
   <header class="top">
     <div class="brand"><h1>NMR<span>em</span>View</h1><span class="pill">Web trial</span></div>
     <button class="btn primary" id="openBtn" type="button">Open NMR data…</button>
-    <input type="file" id="fileInput" multiple hidden accept=".zip,.jdx,.dx,.jcamp,.csv,.txt,.tsv,.asc,.xy,*">
+    <input type="file" id="fileInput" multiple hidden accept=".zip,.jdx,.dx,.jcamp,.jdf,.mnova,.nmrML,.xml,.ft,.ft1,.fid,.1d,.par,.csv,.txt,.tsv,.asc,.xy">
     <input type="file" id="dirInput" webkitdirectory multiple hidden>
     <button class="btn" id="openDir" type="button">Open folder…</button>
     <span class="spacer"></span>
@@ -196,7 +196,7 @@ details td.mono { white-space: nowrap; }
       <div class="warns" id="warns" hidden></div>
       <h2>Example data</h2>
       <div class="samples" id="samples"></div>
-      <div class="drop"><strong>Drop files anywhere.</strong> Bruker experiment folders or .zip, Varian/Agilent .fid folders, JCAMP-DX (.jdx, .dx), or two-column CSV/TXT. Files stay in your browser.</div>
+      <div class="drop"><strong>Drop files anywhere.</strong> Bruker and Varian/Agilent folders or .zip, JEOL .jdf, Magritek Spinsolve folders, NMRPipe, nmrML, JCAMP-DX, MestReNova .mnova (when it embeds open data), or CSV. Files stay in your browser.</div>
     </section>
 
     <section class="panel centre" aria-label="Spectrum">

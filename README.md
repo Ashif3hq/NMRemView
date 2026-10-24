@@ -18,7 +18,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 npm run serve        # builds dist/web and serves it at http://localhost:8765
 ```
 
-Drop a Bruker experiment folder (or .zip), a Varian .fid folder, a JCAMP-DX file or a CSV.
+Drop a Bruker or Varian folder (or .zip), a JEOL .jdf, a Magritek Spinsolve folder, NMRPipe, nmrML or JCAMP-DX file, or a CSV. MestReNova .mnova documents open when they embed open data; otherwise export JCAMP-DX from MestReNova.
 
 ## macOS app (Apple silicon, macOS 14+)
 

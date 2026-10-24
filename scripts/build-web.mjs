@@ -10,7 +10,7 @@ fs.mkdirSync(path.join(out, 'samples'), { recursive: true });
 for (const f of fs.readdirSync(path.join(root, 'core'))) fs.copyFileSync(path.join(root, 'core', f), path.join(out, 'core', f));
 for (const f of fs.readdirSync(path.join(root, 'web/samples'))) {
   const src = path.join(root, 'web/samples', f);
-  if (f.endsWith('.zip')) fs.writeFileSync(path.join(out, 'samples', f + '.b64.txt'), fs.readFileSync(src).toString('base64'));
+  if (/\.(zip|jdf)$/.test(f)) fs.writeFileSync(path.join(out, 'samples', f + '.b64.txt'), fs.readFileSync(src).toString('base64'));
   else fs.copyFileSync(src, path.join(out, 'samples', f));
 }
 for (const f of ['app.js', 'viewer.js']) fs.copyFileSync(path.join(root, 'web', f), path.join(out, f));

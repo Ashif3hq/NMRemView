@@ -175,6 +175,8 @@ tr.ref .nh-in { border-color: var(--accent); }
 .comp-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) 54px 64px 24px; gap: 4px; align-items: center; }
 .comp-row input, .comp-row select { padding: 4px 5px; font-size: 12px; }
 .pctbar { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; }
+.credit { color: var(--muted); font-size: 12px; text-decoration: none; margin-left: 8px; }
+.credit:hover { color: var(--accent); text-decoration: underline; }
 .linkish { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
 .pctbar i { display: block; height: 100%; background: var(--accent); }
 .formula input { width: 120px; border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; background: var(--plot); font-family: var(--font-mono); }
@@ -197,7 +199,7 @@ tr.ref .nh-in { border-color: var(--accent); }
 
 <div class="app" id="app">
   <header class="top">
-    <div class="brand"><h1>NMR<span>em</span>View</h1><span class="pill">Web trial</span></div>
+    <div class="brand"><h1>NMR<span>em</span>View</h1><span class="pill">Web trial</span><a class="credit" href="https://github.com/Ashif3hq/NMRemView" target="_blank" rel="noopener">by Ashif</a></div>
     <button class="btn primary" id="openBtn" type="button">Open NMR data…</button>
     <input type="file" id="fileInput" multiple hidden accept=".zip,.jdx,.dx,.jcamp,.jdf,.mnova,.nmrML,.xml,.ft,.ft1,.fid,.1d,.par,.csv,.txt,.tsv,.asc,.xy">
     <input type="file" id="dirInput" webkitdirectory multiple hidden>

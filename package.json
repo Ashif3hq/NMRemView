@@ -1,6 +1,6 @@
 {
   "name": "nmremview",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "NMRemView: 1H/13C NMR processing and analysis core, web trial and macOS app",
@@ -10,5 +10,8 @@
     "serve": "node scripts/build-web.mjs && cd dist/web && python3 -m http.server 8765",
     "test": "node tests/run-all.mjs"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "author": "Ashif (https://github.com/Ashif3hq)",
+  "contributors": ["Ashif (https://github.com/Ashif3hq)"],
+  "repository": { "type": "git", "url": "https://github.com/Ashif3hq/NMRemView.git" }
 }

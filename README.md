@@ -1,5 +1,7 @@
 # NMRemView
 
+**Created and maintained by [Ashif](https://github.com/Ashif3hq).**
+
 Fast, friendly ¹H and ¹³C NMR analysis for chemists: open almost any 1D NMR file, get a
 processed, phased, integrated spectrum with multiplets, a journal-ready peak list, likely
 assignments and structure suggestions, plus searchable reference shift data by element or
@@ -42,3 +44,8 @@ npm test
 ```
 
 Example spectra in `web/samples` come from the MIT-licensed cheminfo test collections.
+
+## Author
+
+NMRemView is designed and built by **Ashif** ([@Ashif3hq](https://github.com/Ashif3hq)).
+© 2026 Ashif. All rights reserved; see [LICENSE](LICENSE).

@@ -21,6 +21,14 @@ for (const c of cases) {
   console.log(problems.length ? 'FAIL' : 'ok  ', c.file, problems.join('; '));
   if (problems.length) fail++;
 }
+// Polymer maths: 50 units of 1H each against a 6H end group.
+{
+  const dp = N.degreeOfPolymerisation({ repeat: { area: 50, nH: 1 }, end: { area: 6, nH: 6 }, m0: 68.12, endMass: 57.12 });
+  const c = N.composition([{ name: 'A', area: 2, nH: 1, m0: 100 }, { name: 'B', area: 2, nH: 2, m0: 50 }]);
+  const ok = Math.abs(dp.dp - 50) < 1e-9 && Math.abs(dp.mn - (50 * 68.12 + 57.12)) < 1e-6 && Math.abs(c[0].molPct - 66.667) < 0.01 && Math.abs(c[0].wtPct - 80) < 0.01;
+  console.log(ok ? 'ok  ' : 'FAIL', 'polymer DP / composition maths');
+  if (!ok) fail++;
+}
 // Private documents (not in git): every .mnova in tests/private must yield spectra.
 const priv = new URL('./private/', import.meta.url);
 if (fs.existsSync(priv)) for (const f of fs.readdirSync(priv).filter((x) => /\.mnova$/i.test(x))) {

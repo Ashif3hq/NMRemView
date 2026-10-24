@@ -9,6 +9,9 @@ final class Store: ObservableObject {
     @Published var results: [String: SpectrumResult] = [:]
     @Published var warnings: [String] = []
     @Published var errorMessage: String?
+    /// When on, dragging across the spectrum adds an integral region instead of zooming.
+    @Published var integrateMode = false
+    private(set) lazy var polymerLibrary: PolymerLibrary? = try? core?.polymerLibrary()
 
     private var core: CoreBridge?
 
@@ -73,6 +76,36 @@ final class Store: ObservableObject {
         guard let core, let id = selection else { return }
         do { results[id] = try core.run(id: id, changes: changes) }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    // MARK: Integrals
+
+    func addIntegral(_ a: Double, _ b: Double) {
+        guard let r = current else { return }
+        apply(["manualRegions": r.params.manualRegions + [[max(a, b), min(a, b)]]])
+    }
+
+    func removeIntegral(_ s: Signal) {
+        guard let r = current else { return }
+        let kept = r.params.manualRegions.filter { reg in
+            !(abs((reg.max() ?? 0) - s.ppmFrom) < 1e-6 && abs((reg.min() ?? 0) - s.ppmTo) < 1e-6)
+        }
+        apply(["manualRegions": kept])
+    }
+
+    func clearIntegrals() { apply(["manualRegions": [[Double]]()]) }
+
+    /// Sets one integral to `value`; every other integral scales with it.
+    func setIntegral(_ s: Signal, value: Double) {
+        let ref: Any = value > 0 ? (["ppm": s.ppm, "value": value] as [String: Any]) as Any : NSNull()
+        apply(["integralRef": ref])
+    }
+
+    func resetNormalisation() { apply(["integralRef": NSNull()]) }
+
+    func polymer(_ config: [String: Any]) -> PolymerResult? {
+        guard let core, let id = selection else { return nil }
+        return try? core.polymer(id: id, config: config)
     }
 
     func search(_ q: String) -> SearchResult? {

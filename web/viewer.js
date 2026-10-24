@@ -179,7 +179,7 @@ export class SpectrumViewer {
     ctx.stroke();
 
     // Integral curves
-    const sigs = (this.result.analysis.multiplets || []).filter((m) => !m.minor && !m.excluded);
+    const sigs = (this.result.analysis.multiplets || []).filter((m) => (!m.minor || m.manual || m.reference) && !m.excluded);
     const is1H = /1H/.test(s.nucleus);
     if (is1H && this.showCurves) {
       ctx.strokeStyle = C.integral; ctx.lineWidth = 1.3;

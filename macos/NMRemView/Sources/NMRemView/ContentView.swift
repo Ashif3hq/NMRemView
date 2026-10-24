@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var highlight: Signal?
     @State private var dropTargeted = false
 
-    enum Tab: String, CaseIterable { case signals = "Signals", suggestions = "Suggestions", lookup = "Shift lookup" }
+    enum Tab: String, CaseIterable { case signals = "Signals", suggestions = "Suggestions", polymer = "Polymer", lookup = "Lookup" }
 
     var body: some View {
         NavigationSplitView {
@@ -43,7 +43,9 @@ struct ContentView: View {
                     VStack(spacing: 0) {
                         ProcessingBar(result: r)
                         Divider()
-                        SpectrumView(result: r, bands: bands.filter { ($0.nucleus == "13C") == r.is13C }, overlay: overlay, highlight: highlight)
+                        SpectrumView(result: r, bands: bands.filter { ($0.nucleus == "13C") == r.is13C }, overlay: overlay, highlight: highlight,
+                                     integrateMode: store.integrateMode && !r.is13C,
+                                     onIntegrate: { a, b in store.addIntegral(a, b) })
                             .frame(minWidth: 560, minHeight: 380)
                         Divider()
                         HStack(alignment: .top) {
@@ -62,6 +64,7 @@ struct ContentView: View {
                         switch tab {
                         case .signals: SignalsView(result: r, highlight: $highlight)
                         case .suggestions: SuggestionsView(result: r, overlay: $overlay)
+                        case .polymer: PolymerView(result: r).id(r.id)
                         case .lookup: LookupView(result: r, bands: $bands)
                         }
                     }
@@ -101,6 +104,11 @@ struct ProcessingBar: View {
                 HStack { Text("PH0").font(.caption); Slider(value: $ph0, in: -180...180, onEditingChanged: { editing in if !editing { store.apply(["ph0": ph0]) } }).frame(width: 120) }
                 HStack { Text("PH1").font(.caption); Slider(value: $ph1, in: -360...360, onEditingChanged: { editing in if !editing { store.apply(["ph1": ph1]) } }).frame(width: 120) }
                 Button("Auto phase") { store.apply(["autoPhase": true]) }
+            }
+            if !result.is13C {
+                Toggle("Integrate", isOn: $store.integrateMode)
+                    .toggleStyle(.button)
+                    .help("Drag across a signal to add an integral region")
             }
             Toggle("Baseline", isOn: Binding(get: { result.params.baseline }, set: { store.apply(["baseline": $0]) }))
             Stepper("Peak S/N \(Int(result.params.snr))", value: Binding(get: { result.params.snr }, set: { store.apply(["snr": $0]) }), in: 3...60, step: 1)

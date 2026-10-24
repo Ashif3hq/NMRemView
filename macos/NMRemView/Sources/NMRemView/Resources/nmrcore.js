@@ -1668,6 +1668,15 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     }
     return merged.map((r) => describeMultiplet(r, freq));
   }
+  function integrateRange(spec, ppmA, ppmB) {
+    const ax = ppmAxis(spec);
+    let a = Math.round(ax.index(Math.max(ppmA, ppmB))), b = Math.round(ax.index(Math.min(ppmA, ppmB)));
+    a = Math.max(0, a);
+    b = Math.min(spec.real.length - 1, b);
+    let s = 0;
+    for (let k = a; k <= b; k++) s += spec.real[k];
+    return { from: a, to: b, area: s * Math.abs(ax.step), ppmFrom: ax.at(a), ppmTo: ax.at(b) };
+  }
   var NAMES = { 1: "s", 2: "d", 3: "t", 4: "q", 5: "p", 6: "h", 7: "hept" };
   function describeMultiplet(region, freq) {
     const maxH = Math.max(...region.peaks.map((p) => p.height));
@@ -2260,9 +2269,9 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const X = (c.F || 0) + (c.Cl || 0) + (c.Br || 0) + (c.I || 0);
     const H2 = (c.H || 0) + (c.D || 0);
     const dbe = (c.C || 0) + (c.Si || 0) - (H2 + X) / 2 + ((c.N || 0) + (c.P || 0) + (c.B || 0)) / 2 + 1;
-    let mw = 0;
-    for (const [el, n] of Object.entries(c)) mw += (ATOMIC[el] || 0) * n;
-    return { counts: c, dbe, mw, totalH: H2 };
+    let mw2 = 0;
+    for (const [el, n] of Object.entries(c)) mw2 += (ATOMIC[el] || 0) * n;
+    return { counts: c, dbe, mw: mw2, totalH: H2 };
   }
 
   // core/session.js
@@ -2278,6 +2287,8 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       formula: "",
       totalH: null,
       manualRegions: [],
+      // { ppm, value }: the integral containing ppm is set to value and all others scale with it.
+      integralRef: null,
       // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
       autoReference: !!ds.fid && ["jeol", "nmrpipe", "magritek", "nmrml", "mnova"].includes(ds.fid.origin),
       excluded: []
@@ -2350,7 +2361,19 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       }
       for (const m of signals) m.excluded = params.excluded.some((e) => Math.abs(e - m.ppm) < 5e-3);
       a.multiplets = signals;
-      if (/1H/.test(spec.nucleus)) applyIntegralUnit(signals, totalH);
+      let integralUnit = null;
+      if (/1H/.test(spec.nucleus)) {
+        integralUnit = applyIntegralUnit(signals, totalH);
+        const ref = params.integralRef && signals.find((m) => params.integralRef.ppm <= m.ppmFrom + 1e-9 && params.integralRef.ppm >= m.ppmTo - 1e-9);
+        if (ref && ref.area > 0 && params.integralRef.value > 0) {
+          integralUnit = ref.area / params.integralRef.value;
+          for (const m of signals) {
+            m.nH = m.area / integralUnit;
+            if (m.manual) m.minor = false;
+          }
+          ref.reference = true;
+        }
+      }
       const sug = suggest(spec, a, { totalH, formula: fi });
       const visible = signals.filter((m) => !m.excluded);
       return {
@@ -2359,6 +2382,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         analysis: a,
         suggestions: sug,
         formula: fi,
+        integralUnit,
         report: journalReport(spec, visible),
         params: { ...params }
       };
@@ -2388,8 +2412,89 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     return target - centre;
   }
 
+  // core/polymer.js
+  var mw = (f) => (formulaInfo(f) || { mw: 0 }).mw;
+  var POLYMERS = [
+    { id: "pi", name: "Polyisoprene", unit: "C5H8", signal: { label: "=CH (1,4)", from: 5.25, to: 4.95, nH: 1 }, alt: { label: "CH\u2083", from: 1.75, to: 1.5, nH: 3 }, micro: "isoprene" },
+    { id: "pb", name: "Polybutadiene", unit: "C4H6", signal: { label: "=CH (1,4 + 1,2)", from: 5.65, to: 5.25, nH: 2 }, micro: "butadiene" },
+    { id: "ps", name: "Polystyrene", unit: "C8H8", signal: { label: "Ar\u2013H", from: 7.4, to: 6.25, nH: 5 } },
+    { id: "pmma", name: "Poly(methyl methacrylate)", unit: "C5H8O2", signal: { label: "OCH\u2083", from: 3.7, to: 3.5, nH: 3 } },
+    { id: "pnba", name: "Poly(n-butyl acrylate)", unit: "C7H12O2", signal: { label: "OCH\u2082", from: 4.15, to: 3.9, nH: 2 } },
+    { id: "pvac", name: "Poly(vinyl acetate)", unit: "C4H6O2", signal: { label: "CH\u2013O", from: 5, to: 4.7, nH: 1 } },
+    { id: "peg", name: "Poly(ethylene glycol)", unit: "C2H4O", signal: { label: "OCH\u2082CH\u2082O", from: 3.75, to: 3.5, nH: 4 } },
+    { id: "pla", name: "Poly(lactic acid)", unit: "C3H4O2", signal: { label: "CH", from: 5.25, to: 5.08, nH: 1 } },
+    { id: "pcl", name: "Poly(\u03B5-caprolactone)", unit: "C6H10O2", signal: { label: "CH\u2082O", from: 4.12, to: 4, nH: 2 } },
+    { id: "pib", name: "Polyisobutylene", unit: "C4H8", signal: { label: "C(CH\u2083)\u2082", from: 1.2, to: 1, nH: 6 } },
+    { id: "pdms", name: "Poly(dimethylsiloxane)", unit: "C2H6OSi", signal: { label: "Si(CH\u2083)\u2082", from: 0.2, to: -0.05, nH: 6 } }
+  ].map((p) => ({ ...p, m0: mw(p.unit) }));
+  var END_GROUPS = [
+    { id: "sbu", name: "sec-Butyl (s-BuLi initiator)", nH: 6, ppm: "0.8\u20130.9 (2 \xD7 CH\u2083)", mass: mw("C4H9") },
+    { id: "nbu", name: "n-Butyl (n-BuLi initiator)", nH: 3, ppm: "0.85\u20130.92 (CH\u2083)", mass: mw("C4H9") },
+    { id: "tbu", name: "tert-Butyl", nH: 9, ppm: "0.9\u20131.45 (C(CH\u2083)\u2083)", mass: mw("C4H9") },
+    { id: "ome", name: "Methoxy (mPEG, methyl ester)", nH: 3, ppm: "3.3\u20133.4 (OCH\u2083)", mass: mw("CH3O") },
+    { id: "ch2oh", name: "Hydroxymethyl \u2013CH\u2082OH", nH: 2, ppm: "3.6\u20134.1 (CH\u2082OH)", mass: mw("CH3O") },
+    { id: "bn", name: "Benzyl ester/ether (BnOH initiator)", nH: 2, ppm: "5.1 (OCH\u2082Ph)", mass: mw("C7H7O") },
+    { id: "ph", name: "Phenyl (aromatic end)", nH: 5, ppm: "7.1\u20137.4 (Ar\u2013H)", mass: mw("C6H5") },
+    { id: "tms", name: "Trimethylsilyl", nH: 9, ppm: "0.0\u20130.2 (Si(CH\u2083)\u2083)", mass: mw("C3H9Si") },
+    { id: "vinyl", name: "Vinyl / methacrylate end (=CH\u2082)", nH: 2, ppm: "4.6\u20136.2 (=CH\u2082)", mass: mw("C2H3") },
+    { id: "cho", name: "Aldehyde (\u2013CHO)", nH: 1, ppm: "9.5\u20139.8 (CHO)", mass: mw("CHO") },
+    { id: "custom", name: "Custom", nH: 1, ppm: "", mass: 0 }
+  ];
+  function degreeOfPolymerisation({ repeat, end, m0 = 0, endMass = 0 }) {
+    if (!(repeat && end && repeat.area > 0 && end.area > 0 && repeat.nH > 0 && end.nH > 0)) return null;
+    const perUnit = repeat.area / repeat.nH;
+    const perChain = end.area / (end.nH * (end.count || 1));
+    const dp = perUnit / perChain;
+    const mn = m0 > 0 ? dp * m0 + (endMass || 0) : null;
+    return { dp, mn, perUnit, perChain };
+  }
+  function composition(components) {
+    const rows = components.filter((c) => c.area > 0 && c.nH > 0).map((c) => ({ ...c, mol: c.area / c.nH }));
+    const totMol = rows.reduce((a, c) => a + c.mol, 0);
+    const totMass = rows.reduce((a, c) => a + c.mol * (c.m0 || 0), 0);
+    return rows.map((c) => ({ ...c, molPct: 100 * c.mol / totMol, wtPct: totMass > 0 ? 100 * c.mol * (c.m0 || 0) / totMass : null }));
+  }
+  function microstructure(spec, kind) {
+    const A = (a, b) => Math.max(0, integrateRange(spec, a, b).area);
+    if (kind === "isoprene") {
+      const u14 = A(5.25, 4.95) / 1;
+      const u34 = A(4.8, 4.55) / 2;
+      const u12 = A(5.9, 5.65) / 1;
+      const tot = u14 + u34 + u12;
+      if (!(tot > 0)) return null;
+      const cis = A(1.75, 1.645), trans = A(1.645, 1.55);
+      const r = [
+        { label: "1,4-units", pct: 100 * u14 / tot, how: "=CH, \u03B4 5.12 (1H)" },
+        { label: "3,4-units", pct: 100 * u34 / tot, how: "=CH\u2082, \u03B4 4.6\u20134.8 (2H)" },
+        { label: "1,2-units", pct: 100 * u12 / tot, how: "CH=, \u03B4 5.7\u20135.9 (1H)" }
+      ];
+      const ct = cis + trans > 0 ? { cis: 100 * cis / (cis + trans), trans: 100 * trans / (cis + trans) } : null;
+      return { rows: r, cisTrans: ct, note: "cis/trans from the CH\u2083 signals (cis 1.68, trans 1.60 ppm); 3,4-unit CH\u2083 also falls near 1.6 ppm." };
+    }
+    if (kind === "butadiene") {
+      const vinylCH2 = A(5.08, 4.85) / 2;
+      const olefin = A(5.65, 5.25);
+      const u14 = Math.max(0, (olefin - vinylCH2) / 2);
+      const tot = u14 + vinylCH2;
+      if (!(tot > 0)) return null;
+      return {
+        rows: [
+          { label: "1,4-units", pct: 100 * u14 / tot, how: "=CH, \u03B4 5.3\u20135.5 (2H)" },
+          { label: "1,2-units (vinyl)", pct: 100 * vinylCH2 / tot, how: "=CH\u2082, \u03B4 4.9\u20135.0 (2H)" }
+        ],
+        cisTrans: null,
+        note: "cis/trans 1,4 cannot be separated reliably by \xB9H; use \xB9\xB3C (cis 27.4, trans 32.7 ppm)."
+      };
+    }
+    return null;
+  }
+  function repeatArea(spec, polymer) {
+    return Math.max(0, integrateRange(spec, polymer.signal.from, polymer.signal.to).area);
+  }
+
   // macos/bridge/bridge.js
   var sessions = /* @__PURE__ */ new Map();
+  var lastResults = /* @__PURE__ */ new Map();
   function fromBase64(b642) {
     const T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const map = new Uint8Array(128);
@@ -2431,6 +2536,9 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       minor: !!m.minor,
       excluded: !!m.excluded,
       flag: m.flag ? m.flag.label : null,
+      area: m.area || 0,
+      manual: !!m.manual,
+      reference: !!m.reference,
       candidates: (m.candidates || []).slice(0, 3).map((c) => c.group.name)
     });
     return {
@@ -2449,7 +2557,19 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       hints: r.suggestions.hints.map((h) => ({ text: h.text, detail: h.detail })),
       compounds: r.suggestions.compounds.map((c) => ({ name: c.compound.name, formula: c.compound.formula, score: c.score, h: c.compound.h.map((x) => x[0]), c: c.compound.c })),
       report: r.report,
-      params: { ph0: r.params.ph0, ph1: r.params.ph1, lb: r.params.lb, snr: r.params.snr, baseline: r.params.baseline, fromFid: r.params.fromFid, referenceShift: r.params.referenceShift, formula: r.params.formula }
+      params: {
+        ph0: r.params.ph0,
+        ph1: r.params.ph1,
+        lb: r.params.lb,
+        snr: r.params.snr,
+        baseline: r.params.baseline,
+        fromFid: r.params.fromFid,
+        referenceShift: r.params.referenceShift,
+        formula: r.params.formula,
+        manualRegions: r.params.manualRegions.map(([a, b]) => [a, b]),
+        hasIntegralRef: !!r.params.integralRef
+      },
+      integralUnit: r.integralUnit || 0
     };
   }
   globalThis.NMRBridge = {
@@ -2469,10 +2589,48 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       const s = sessions.get(id);
       if (!s) throw new Error("Unknown dataset " + id);
       const r = s.set(JSON.parse(paramsJSON || "{}"));
+      lastResults.set(id, r);
       return JSON.stringify(summarise(id, r, cols));
     },
     close(id) {
       sessions.delete(id);
+      lastResults.delete(id);
+    },
+    polymerLibrary() {
+      return JSON.stringify({
+        polymers: POLYMERS.map((p) => ({ id: p.id, name: p.name, unit: p.unit, m0: p.m0, signalLabel: p.signal.label, from: p.signal.from, to: p.signal.to, nH: p.signal.nH, micro: p.micro || "" })),
+        endGroups: END_GROUPS.map((g) => ({ id: g.id, name: g.name, nH: g.nH, ppm: g.ppm, mass: g.mass }))
+      });
+    },
+    // config: { polymer, repeatSig ('window' | ppm), repeatH, m0, endSig (ppm | null), endH, endCount, endMass,
+    //           comps: [{ name, sig, nH, m0 }] }. Signals are named by their centre ppm.
+    polymer(id, configJSON) {
+      const r = lastResults.get(id);
+      if (!r) throw new Error("Run the dataset first");
+      const c = JSON.parse(configJSON);
+      const sigs = r.analysis.multiplets.filter((m) => !m.excluded);
+      const at = (ppm) => ppm == null ? null : sigs.find((m) => Math.abs(m.ppm - ppm) < 1e-4);
+      const poly = POLYMERS.find((p) => p.id === c.polymer);
+      let repeat = null;
+      if (c.repeatSig === "window" && poly) repeat = { area: repeatArea(r.spectrum, poly), nH: c.repeatH };
+      else {
+        const m = at(c.repeatSig);
+        if (m) repeat = { area: m.area, nH: c.repeatH };
+      }
+      const e = at(c.endSig);
+      const dp = degreeOfPolymerisation({ repeat, end: e ? { area: e.area, nH: c.endH, count: c.endCount || 1 } : null, m0: c.m0, endMass: c.endMass });
+      const comp = composition((c.comps || []).map((x) => {
+        const m = at(x.sig);
+        return { name: x.name, area: m ? m.area : 0, nH: x.nH, m0: x.m0 };
+      }));
+      const micro = poly && poly.micro ? microstructure(r.spectrum, poly.micro) : null;
+      return JSON.stringify({
+        repeatIntegral: repeat && r.integralUnit ? repeat.area / r.integralUnit : null,
+        dp: dp ? dp.dp : null,
+        mn: dp ? dp.mn : null,
+        composition: comp.map((x) => ({ name: x.name, molPct: x.molPct, wtPct: x.wtPct })),
+        microstructure: micro ? { rows: micro.rows, cis: micro.cisTrans ? micro.cisTrans.cis : null, trans: micro.cisTrans ? micro.cisTrans.trans : null, note: micro.note } : null
+      });
     },
     search(query) {
       const r = searchReference(query);

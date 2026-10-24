@@ -1,8 +1,12 @@
 // JavaScriptCore entry point for the macOS app. Exposes a small JSON-in/JSON-out API on
 // globalThis.NMRBridge so Swift never has to touch JS objects directly.
-import { loadExpanded, createSession, searchReference, SOLVENTS, IMPURITIES, COUPLINGS } from '../../core/index.js';
+import {
+  loadExpanded, createSession, searchReference, SOLVENTS, IMPURITIES, COUPLINGS,
+  POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea,
+} from '../../core/index.js';
 
 const sessions = new Map();
+const lastResults = new Map();
 
 function fromBase64(b64) {
   const T = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -38,6 +42,7 @@ function summarise(id, r, cols) {
   const sig = (m) => ({
     ppm: m.ppm, ppmFrom: m.ppmFrom, ppmTo: m.ppmTo, multiplicity: m.multiplicity, J: m.J, nH: m.nH || 0,
     minor: !!m.minor, excluded: !!m.excluded, flag: m.flag ? m.flag.label : null,
+    area: m.area || 0, manual: !!m.manual, reference: !!m.reference,
     candidates: (m.candidates || []).slice(0, 3).map((c) => c.group.name),
   });
   return {
@@ -48,7 +53,12 @@ function summarise(id, r, cols) {
     hints: r.suggestions.hints.map((h) => ({ text: h.text, detail: h.detail })),
     compounds: r.suggestions.compounds.map((c) => ({ name: c.compound.name, formula: c.compound.formula, score: c.score, h: c.compound.h.map((x) => x[0]), c: c.compound.c })),
     report: r.report,
-    params: { ph0: r.params.ph0, ph1: r.params.ph1, lb: r.params.lb, snr: r.params.snr, baseline: r.params.baseline, fromFid: r.params.fromFid, referenceShift: r.params.referenceShift, formula: r.params.formula },
+    params: {
+      ph0: r.params.ph0, ph1: r.params.ph1, lb: r.params.lb, snr: r.params.snr, baseline: r.params.baseline, fromFid: r.params.fromFid,
+      referenceShift: r.params.referenceShift, formula: r.params.formula,
+      manualRegions: r.params.manualRegions.map(([a, b]) => [a, b]), hasIntegralRef: !!r.params.integralRef,
+    },
+    integralUnit: r.integralUnit || 0,
   };
 }
 
@@ -69,9 +79,39 @@ globalThis.NMRBridge = {
     const s = sessions.get(id);
     if (!s) throw new Error('Unknown dataset ' + id);
     const r = s.set(JSON.parse(paramsJSON || '{}'));
+    lastResults.set(id, r);
     return JSON.stringify(summarise(id, r, cols));
   },
-  close(id) { sessions.delete(id); },
+  close(id) { sessions.delete(id); lastResults.delete(id); },
+  polymerLibrary() {
+    return JSON.stringify({
+      polymers: POLYMERS.map((p) => ({ id: p.id, name: p.name, unit: p.unit, m0: p.m0, signalLabel: p.signal.label, from: p.signal.from, to: p.signal.to, nH: p.signal.nH, micro: p.micro || '' })),
+      endGroups: END_GROUPS.map((g) => ({ id: g.id, name: g.name, nH: g.nH, ppm: g.ppm, mass: g.mass })),
+    });
+  },
+  // config: { polymer, repeatSig ('window' | ppm), repeatH, m0, endSig (ppm | null), endH, endCount, endMass,
+  //           comps: [{ name, sig, nH, m0 }] }. Signals are named by their centre ppm.
+  polymer(id, configJSON) {
+    const r = lastResults.get(id);
+    if (!r) throw new Error('Run the dataset first');
+    const c = JSON.parse(configJSON);
+    const sigs = r.analysis.multiplets.filter((m) => !m.excluded);
+    const at = (ppm) => (ppm == null ? null : sigs.find((m) => Math.abs(m.ppm - ppm) < 1e-4));
+    const poly = POLYMERS.find((p) => p.id === c.polymer);
+    let repeat = null;
+    if (c.repeatSig === 'window' && poly) repeat = { area: repeatArea(r.spectrum, poly), nH: c.repeatH };
+    else { const m = at(c.repeatSig); if (m) repeat = { area: m.area, nH: c.repeatH }; }
+    const e = at(c.endSig);
+    const dp = degreeOfPolymerisation({ repeat, end: e ? { area: e.area, nH: c.endH, count: c.endCount || 1 } : null, m0: c.m0, endMass: c.endMass });
+    const comp = composition((c.comps || []).map((x) => { const m = at(x.sig); return { name: x.name, area: m ? m.area : 0, nH: x.nH, m0: x.m0 }; }));
+    const micro = poly && poly.micro ? microstructure(r.spectrum, poly.micro) : null;
+    return JSON.stringify({
+      repeatIntegral: repeat && r.integralUnit ? repeat.area / r.integralUnit : null,
+      dp: dp ? dp.dp : null, mn: dp ? dp.mn : null,
+      composition: comp.map((x) => ({ name: x.name, molPct: x.molPct, wtPct: x.wtPct })),
+      microstructure: micro ? { rows: micro.rows, cis: micro.cisTrans ? micro.cisTrans.cis : null, trans: micro.cisTrans ? micro.cisTrans.trans : null, note: micro.note } : null,
+    });
+  },
   search(query) {
     const r = searchReference(query);
     return JSON.stringify({

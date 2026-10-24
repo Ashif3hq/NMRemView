@@ -7,6 +7,8 @@ struct SpectrumView: View {
     var bands: [ShiftGroup] = []
     var overlay: CompoundMatch?
     var highlight: Signal?
+    var integrateMode = false
+    var onIntegrate: ((Double, Double) -> Void)? = nil
 
     @State private var view: ClosedRange<Double>?
     @State private var dragStart: CGFloat?
@@ -32,14 +34,17 @@ struct SpectrumView: View {
                         .onEnded { v in
                             let a = ppm(at: v.startLocation.x, width: geo.size.width, range: range)
                             let b = ppm(at: v.location.x, width: geo.size.width, range: range)
-                            if abs(a - b) > 0.001 { view = min(a, b)...max(a, b) }
+                            if abs(a - b) > 0.001 {
+                                if integrateMode, let onIntegrate { onIntegrate(max(a, b), min(a, b)) }
+                                else { view = min(a, b)...max(a, b) }
+                            }
                             dragStart = nil; dragNow = nil
                         }
                 )
                 .onTapGesture(count: 2) { view = nil }
                 .overlay(alignment: .topLeading) {
                     if let s = dragStart, let n = dragNow {
-                        Rectangle().fill(Color.accentColor.opacity(0.12))
+                        Rectangle().fill((integrateMode ? Color.orange : Color.accentColor).opacity(0.15))
                             .frame(width: abs(n - s)).offset(x: min(s, n))
                     }
                 }
@@ -140,13 +145,13 @@ struct SpectrumView: View {
 
         // Integral brackets
         if !result.is13C {
-            for s in result.signals where !s.minor && !s.excluded {
+            for s in result.signals where (!s.minor || s.manual || s.reference) && !s.excluded {
                 let x1 = x(s.ppmFrom, width: W, range: range), x2 = x(s.ppmTo, width: W, range: range)
                 guard x2 > margin, x1 < W - margin else { continue }
                 var br = Path()
                 br.move(to: CGPoint(x: x1, y: axisY + 26)); br.addLine(to: CGPoint(x: x1, y: axisY + 30))
                 br.addLine(to: CGPoint(x: x2, y: axisY + 30)); br.addLine(to: CGPoint(x: x2, y: axisY + 26))
-                ctx.stroke(br, with: .color(.orange), lineWidth: 1.2)
+                ctx.stroke(br, with: .color(s.manual ? .pink : .orange), lineWidth: s.reference ? 2 : 1.2)
                 ctx.draw(Text(String(format: "%.2f", s.nH)).font(.system(size: 10, design: .monospaced).weight(.semibold)).foregroundColor(.orange), at: CGPoint(x: (x1 + x2) / 2, y: axisY + 42))
             }
         }

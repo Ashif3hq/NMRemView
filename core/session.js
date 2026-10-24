@@ -17,6 +17,8 @@ export function createSession(ds) {
     formula: '',
     totalH: null,
     manualRegions: [],
+    // { ppm, value }: the integral containing ppm is set to value and all others scale with it.
+    integralRef: null,
     // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
     autoReference: !!ds.fid && ['jeol', 'nmrpipe', 'magritek', 'nmrml', 'mnova'].includes(ds.fid.origin),
     excluded: [],
@@ -84,11 +86,20 @@ export function createSession(ds) {
     }
     for (const m of signals) m.excluded = params.excluded.some((e) => Math.abs(e - m.ppm) < 0.005);
     a.multiplets = signals;
-    if (/1H/.test(spec.nucleus)) applyIntegralUnit(signals, totalH);
+    let integralUnit = null;
+    if (/1H/.test(spec.nucleus)) {
+      integralUnit = applyIntegralUnit(signals, totalH);
+      const ref = params.integralRef && signals.find((m) => params.integralRef.ppm <= m.ppmFrom + 1e-9 && params.integralRef.ppm >= m.ppmTo - 1e-9);
+      if (ref && ref.area > 0 && params.integralRef.value > 0) {
+        integralUnit = ref.area / params.integralRef.value;
+        for (const m of signals) { m.nH = m.area / integralUnit; if (m.manual) m.minor = false; }
+        ref.reference = true;
+      }
+    }
     const sug = suggest(spec, a, { totalH, formula: fi });
     const visible = signals.filter((m) => !m.excluded);
     return {
-      spectrum: spec, baseline, analysis: a, suggestions: sug, formula: fi,
+      spectrum: spec, baseline, analysis: a, suggestions: sug, formula: fi, integralUnit,
       report: journalReport(spec, visible), params: { ...params },
     };
   }

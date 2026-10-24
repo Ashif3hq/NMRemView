@@ -10,6 +10,11 @@ functional group.
 * `macos/` native SwiftUI app for Apple silicon that runs the same core through JavaScriptCore
 * `tests/` regression checks on real spectra
 
+Integrals work like in MestReNova: drag to add a region, type a value to normalise every
+integral to it, delete single regions. The Polymer panel turns integrals into polymer data:
+DPₙ and Mₙ by end-group analysis (repeat-unit and end-group presets), copolymer mole and weight
+fractions, and polyisoprene / polybutadiene microstructure (1,4 / 3,4 / 1,2, cis : trans).
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## Web trial

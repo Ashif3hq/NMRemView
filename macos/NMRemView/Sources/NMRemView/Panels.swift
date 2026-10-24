@@ -5,8 +5,9 @@ struct SignalsView: View {
     let result: SpectrumResult
     @Binding var highlight: Signal?
     @State private var formula = ""
+    @State private var showSmall = false
 
-    var rows: [Signal] { result.signals.filter { !$0.minor } }
+    var rows: [Signal] { result.signals.filter { showSmall || !$0.minor || $0.manual || $0.reference } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -15,7 +16,16 @@ struct SignalsView: View {
                     Text("Formula").foregroundStyle(.secondary)
                     TextField("e.g. C13H18O2", text: $formula).textFieldStyle(.roundedBorder).frame(width: 140)
                         .onSubmit { store.apply(["formula": formula]) }
+                    Spacer()
+                    Toggle("Small signals", isOn: $showSmall).toggleStyle(.checkbox)
                 }
+                .padding(.horizontal, 10)
+                HStack {
+                    if result.params.hasIntegralRef { Button("Reset normalisation") { store.resetNormalisation() } }
+                    if !result.params.manualRegions.isEmpty { Button("Clear manual integrals") { store.clearIntegrals() } }
+                    Spacer()
+                }
+                .controlSize(.small)
                 .padding(.horizontal, 10)
             }
             Table(rows, selection: Binding(get: { highlight?.id }, set: { id in highlight = rows.first { $0.id == id } })) {
@@ -25,16 +35,46 @@ struct SignalsView: View {
                 }.width(min: 70, ideal: 90)
                 TableColumn("Mult.") { s in Text(result.is13C ? "" : s.multiplicity).bold() }.width(44)
                 TableColumn("J (Hz)") { s in Text(s.J.map { String(format: "%.1f", $0) }.joined(separator: ", ")) }.width(min: 40, ideal: 60)
-                TableColumn("nH") { s in Text(result.is13C ? "" : String(format: "%.2f", s.nH)) }.width(40)
+                TableColumn("nH") { s in
+                    if result.is13C { Text("") } else { IntegralField(signal: s) }
+                }.width(58)
                 TableColumn("Likely environment") { s in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(s.candidates.first ?? "–")
-                        if let f = s.flag { Text(f).font(.caption).foregroundStyle(.orange) }
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(s.manual ? "Manual integral" : (s.candidates.first ?? "–"))
+                            if let f = s.flag { Text(f).font(.caption).foregroundStyle(.orange) }
+                        }
+                        Spacer()
+                        if s.manual {
+                            Button { store.removeIntegral(s) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless).help("Delete this integral")
+                        }
                     }
                 }
             }
+            if !result.is13C {
+                Text("Type a value in nH to set that integral; the others scale with it. Turn on Integrate in the toolbar and drag across a signal to add a region.")
+                    .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 8)
+            }
         }
         .onAppear { formula = result.params.formula }
+    }
+}
+
+/// Editable integral value. Committing a number normalises all integrals to it.
+struct IntegralField: View {
+    @EnvironmentObject var store: Store
+    let signal: Signal
+    @State private var text = ""
+
+    var body: some View {
+        TextField("", text: $text)
+            .font(.system(.body, design: .monospaced))
+            .textFieldStyle(.plain)
+            .foregroundStyle(signal.reference ? Color.accentColor : Color.primary)
+            .onSubmit { if let v = Double(text.replacingOccurrences(of: ",", with: ".")) { store.setIntegral(signal, value: v) } }
+            .onAppear { text = String(format: "%.2f", signal.nH) }
+            .onChange(of: signal.nH) { text = String(format: "%.2f", signal.nH) }
     }
 }
 

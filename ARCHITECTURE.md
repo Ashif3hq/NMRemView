@@ -68,3 +68,11 @@ Today the "suggestions" are deterministic and explainable:
 Next steps for "intelligent": larger reference database (e.g. nmrshiftdb2, open data), shift
 prediction from a drawn structure, and an optional Claude-powered assistant that explains the
 spectrum and proposes structures from the peak table, formula and fragment hints.
+
+## Polymer analysis (`core/polymer.js`)
+
+* `degreeOfPolymerisation`: DPₙ = (∫repeat / H per unit) ÷ (∫end / H in end signal × ends per chain); Mₙ = DPₙ·M₀ + M_end.
+* `composition`: mole fraction from ∫/nH per monomer, weight fraction weighted by M₀.
+* `microstructure`: fixed CDCl₃ windows. Polyisoprene: 1,4 (=CH 5.12, 1H), 3,4 (=CH₂ 4.6–4.8, 2H), 1,2 (CH= 5.7–5.9, 1H), cis/trans from CH₃ 1.68 / 1.60. Polybutadiene: 1,2 from =CH₂ 4.9–5.0, 1,4 from the remaining olefinic area.
+* Integral normalisation: session param `integralRef = { ppm, value }` scales every integral so the one containing `ppm` equals `value`.
+

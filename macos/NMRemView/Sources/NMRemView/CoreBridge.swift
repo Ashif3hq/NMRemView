@@ -35,6 +35,9 @@ struct Signal: Codable, Identifiable, Hashable {
     let excluded: Bool
     let flag: String?
     let candidates: [String]
+    let area: Double
+    let manual: Bool
+    let reference: Bool
 }
 
 struct Hint: Codable, Hashable {
@@ -60,6 +63,8 @@ struct Params: Codable {
     var fromFid: Bool
     var referenceShift: Double
     var formula: String
+    var manualRegions: [[Double]]
+    var hasIntegralRef: Bool
 }
 
 struct SpectrumResult: Codable {
@@ -80,6 +85,7 @@ struct SpectrumResult: Codable {
     let compounds: [CompoundMatch]
     let report: String
     let params: Params
+    let integralUnit: Double
 
     var is13C: Bool { nucleus.contains("13C") }
 }
@@ -113,6 +119,42 @@ struct SearchResult: Codable {
     let groups: [ShiftGroup]
     let compounds: [CompoundName]
     struct CompoundName: Codable, Hashable { let name: String; let formula: String }
+}
+
+struct PolymerPreset: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let unit: String
+    let m0: Double
+    let signalLabel: String
+    let from: Double
+    let to: Double
+    let nH: Double
+    let micro: String
+}
+
+struct EndGroupPreset: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let nH: Double
+    let ppm: String
+    let mass: Double
+}
+
+struct PolymerLibrary: Codable {
+    let polymers: [PolymerPreset]
+    let endGroups: [EndGroupPreset]
+}
+
+struct PolymerResult: Codable {
+    struct Comp: Codable, Hashable { let name: String; let molPct: Double; let wtPct: Double? }
+    struct MicroRow: Codable, Hashable { let label: String; let pct: Double; let how: String }
+    struct Micro: Codable { let rows: [MicroRow]; let cis: Double?; let trans: Double?; let note: String }
+    let repeatIntegral: Double?
+    let dp: Double?
+    let mn: Double?
+    let composition: [Comp]
+    let microstructure: Micro?
 }
 
 enum CoreError: LocalizedError {
@@ -169,5 +211,14 @@ final class CoreBridge {
 
     func search(_ query: String) throws -> SearchResult {
         try decode(try call("search", [query]))
+    }
+
+    func polymerLibrary() throws -> PolymerLibrary {
+        try decode(try call("polymerLibrary", []))
+    }
+
+    func polymer(id: String, config: [String: Any]) throws -> PolymerResult {
+        let json = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8) ?? "{}"
+        return try decode(try call("polymer", [id, json]))
     }
 }

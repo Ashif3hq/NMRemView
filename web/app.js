@@ -147,7 +147,12 @@ function renderTab() {
   if (state.tab === 'signals') body.innerHTML = signalsHTML(it);
   if (state.tab === 'suggest') body.innerHTML = suggestHTML(it);
   if (state.tab === 'info') body.innerHTML = infoHTML(it);
+  if (state.tab === 'polymer') body.innerHTML = polymerHTML(it);
   bindTab(it);
+}
+
+function visibleSignals(it) {
+  return it.result.analysis.multiplets.filter((m) => state.showMinor || !m.minor || m.manual || m.reference);
 }
 
 function fmtJ(J) { return J.length ? J.map((j) => j.toFixed(1)).join(', ') : ''; }
@@ -155,19 +160,19 @@ function fmtJ(J) { return J.length ? J.map((j) => j.toFixed(1)).join(', ') : '';
 function signalsHTML(it) {
   const r = it.result;
   const is13 = /13C/.test(it.ds.nucleus);
-  const sigs = r.analysis.multiplets.filter((m) => !m.minor || m.manual);
-  const minor = r.analysis.multiplets.length - sigs.length;
+  const sigs = visibleSignals(it);
+  const minor = r.analysis.multiplets.length - r.analysis.multiplets.filter((m) => !m.minor || m.manual).length;
   const rows = sigs.map((m, k) => {
     const c = m.candidates || [];
     const top = c[0] ? esc(c[0].group.name) : '<span class="alt">no match in table</span>';
     const alt = c.slice(1, 3).map((x) => esc(x.group.name)).join(' · ');
     const flag = m.flag ? `<div><span class="flag ${m.flag.kind}">${esc(m.flag.label)}</span></div>` : '';
     const shift = !is13 && m.multiplicity === 'm' ? `${m.ppmFrom.toFixed(2)}–${m.ppmTo.toFixed(2)}` : m.ppm.toFixed(is13 ? 1 : 2);
-    return `<tr data-k="${k}" class="${m.excluded || (m.flag && m.flag.kind === 'solvent') ? 'muted' : ''} ${state.hoverSig && Math.abs(state.hoverSig.ppm - m.ppm) < 1e-6 ? 'hl' : ''}">
+    return `<tr data-k="${k}" class="${m.reference ? 'ref ' : ''}${m.excluded || (m.flag && m.flag.kind === 'solvent') ? 'muted' : ''} ${state.hoverSig && Math.abs(state.hoverSig.ppm - m.ppm) < 1e-6 ? 'hl' : ''}">
       <td class="mono">${shift}</td>
-      ${is13 ? '' : `<td class="mult">${esc(m.multiplicity)}</td><td class="mono">${fmtJ(m.J)}</td><td class="mono">${m.excluded ? '–' : (m.nH || 0).toFixed(2)}</td>`}
+      ${is13 ? '' : `<td class="mult">${esc(m.multiplicity)}</td><td class="mono">${fmtJ(m.J)}</td><td class="mono">${m.excluded ? '–' : `<input class="nh-in" data-nh="${k}" type="number" step="any" min="0" value="${(m.nH || 0).toFixed(2)}" title="Type a value to normalise all integrals to this one" aria-label="Integral">`}</td>`}
       <td class="assign">${top}${alt ? `<div class="alt">${alt}</div>` : ''}${flag}</td>
-      <td><button class="x" data-ex="${k}" type="button" title="${m.excluded ? 'Include' : 'Exclude from report and integrals'}" aria-label="Toggle signal">${m.excluded ? '↺' : '×'}</button></td>
+      <td>${m.manual ? `<button class="x" data-rm="${k}" type="button" title="Delete this manual integral" aria-label="Delete integral">🗑</button>` : `<button class="x" data-ex="${k}" type="button" title="${m.excluded ? 'Include' : 'Exclude from report and integrals'}" aria-label="Toggle signal">${m.excluded ? '↺' : '×'}</button>`}</td>
     </tr>`;
   }).join('');
   const head = is13 ? '<th>δ ppm</th><th>Likely environment</th><th></th>' : '<th>δ ppm</th><th>Mult.</th><th>J (Hz)</th><th>nH</th><th>Likely environment</th><th></th>';
@@ -175,9 +180,10 @@ function signalsHTML(it) {
       <label for="formula" class="alt">Formula</label><input id="formula" type="text" placeholder="e.g. C13H18O2" value="${esc(it.session.params.formula)}">
       ${r.formula ? `<span class="mono">DBE ${r.formula.dbe} · ${r.formula.mw.toFixed(2)} g/mol · ${r.formula.totalH} H</span>` : '<span class="alt">sets the total H for integrals</span>'}
       ${it.session.params.manualRegions.length ? '<button class="btn small" id="clearManual" type="button">Clear manual integrals</button>' : ''}
+      ${it.session.params.integralRef ? '<button class="btn small" id="clearNorm" type="button">Reset normalisation</button>' : ''}
     </div>`;
   return `${formula}<table class="sig"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>
-    <p class="assign alt" style="margin-top:10px">${sigs.length} signals${minor ? `, ${minor} minor peaks hidden (satellites, impurities)` : ''}. Click a row to zoom to it.</p>`;
+    <p class="assign alt" style="margin-top:10px">${sigs.length} signals${minor ? ` · <button class="linkish" id="toggleMinor" type="button">${state.showMinor ? 'hide' : 'show'} ${minor} small signals</button>` : ''}. Click a row to zoom to it. Type in the nH column to set that integral (the others scale with it). Use Integrate in the toolbar to add your own regions.</p>`;
 }
 
 function suggestHTML(it) {
@@ -211,6 +217,132 @@ function infoHTML(it) {
   const fidBtn = ds.fid && ds.rawReal ? `<button class="btn small" id="toggleFid" type="button">${p.fromFid ? 'Use vendor-processed spectrum' : 'Reprocess from FID'}</button>` : '';
   return `<div class="section"><h3>Referencing</h3>${refUI}${p.referenceShift ? '<button class="btn small" id="clearRef" type="button">Clear reference correction</button>' : ''}</div>
     <div class="section"><h3>Dataset</h3><dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${fidBtn}</div>`;
+}
+
+// ---------- Polymer tools ----------
+function polyState(it) {
+  if (!it.poly) {
+    const guess = NMR.POLYMERS.find((p) => it.result.suggestions.compounds.slice(0, 2).some((c) => c.compound.name.toLowerCase().includes(p.name.toLowerCase().split(' ')[0].replace('poly(', '')))) || NMR.POLYMERS[0];
+    it.poly = { polymer: guess.id, repeatSig: 'window', repeatH: guess.signal.nH, m0: +guess.m0.toFixed(2), end: 'custom', endSig: '', endH: 1, endCount: 1, endMass: 0, comps: [] };
+  }
+  return it.poly;
+}
+const sigKey = (m) => m.ppm.toFixed(4);
+function polySignals(it) { return it.result.analysis.multiplets.filter((m) => !m.excluded); }
+function sigArea(it, key) {
+  const m = polySignals(it).find((x) => sigKey(x) === key);
+  return m ? { area: m.area, nH: m.nH, m } : null;
+}
+function sigOptions(it, sel, extra = '') {
+  const list = polySignals(it).slice().sort((a, b) => b.ppm - a.ppm);
+  return extra + '<option value="">— choose a signal —</option>' + list.map((m) => {
+    const range = `${m.ppmFrom.toFixed(2)}–${m.ppmTo.toFixed(2)}`;
+    return `<option value="${sigKey(m)}" ${sel === sigKey(m) ? 'selected' : ''}>δ ${m.ppm.toFixed(2)} (${range}) · ∫ ${(m.nH || 0).toFixed(2)}${m.manual ? ' · manual' : ''}</option>`;
+  }).join('');
+}
+const fmt = (v, d = 2) => (v == null || !isFinite(v) ? '–' : v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d }));
+
+function polymerCalc(it) {
+  const P = polyState(it);
+  const poly = NMR.POLYMERS.find((p) => p.id === P.polymer);
+  const u = it.result.integralUnit || 1;
+  let repeat = null;
+  if (P.repeatSig === 'window' && poly) repeat = { area: NMR.repeatArea(it.result.spectrum, poly), nH: P.repeatH };
+  else if (P.repeatSig) { const s = sigArea(it, P.repeatSig); if (s) repeat = { area: s.area, nH: P.repeatH }; }
+  const e = P.endSig ? sigArea(it, P.endSig) : null;
+  const end = e ? { area: e.area, nH: P.endH, count: P.endCount } : null;
+  const dp = NMR.degreeOfPolymerisation({ repeat, end, m0: P.m0, endMass: P.endMass });
+  const comp = NMR.composition(P.comps.map((c) => { const s = sigArea(it, c.sig); return { name: c.name, area: s ? s.area : 0, nH: c.nH, m0: c.m0 }; }));
+  return { P, poly, repeat, end, dp, comp, u };
+}
+
+function polymerHTML(it) {
+  if (!/1H/.test(it.ds.nucleus)) return '<p class="assign alt">Polymer tools use ¹H integrals. Open a ¹H spectrum.</p>';
+  const { P, poly, repeat, dp, comp, u } = polymerCalc(it);
+  const endPreset = NMR.END_GROUPS.find((g) => g.id === P.end);
+  const micro = poly && poly.micro ? NMR.microstructure(it.result.spectrum, poly.micro) : null;
+  const repeatInt = repeat ? repeat.area / u : null;
+  const summary = dp ? `DP(¹H NMR) = ${fmt(dp.dp, 1)}${dp.mn ? `, Mn(NMR) = ${Math.round(dp.mn).toLocaleString('en-US')} g/mol` : ''} (${poly ? poly.name : 'repeat unit'}, M₀ = ${fmt(P.m0)} g/mol; end group ${endPreset ? endPreset.name : ''}, ${P.endH}H)` : '';
+  let out = `<div class="section"><h3>Repeat unit</h3><div class="poly">
+    <div class="row"><label for="pPoly">Polymer</label><select id="pPoly">${NMR.POLYMERS.map((p) => `<option value="${p.id}" ${p.id === P.polymer ? 'selected' : ''}>${esc(p.name)} (${esc(p.unit)})</option>`).join('')}<option value="custom" ${P.polymer === 'custom' ? 'selected' : ''}>Custom repeat unit</option></select></div>
+    <div class="row"><label for="pRep">Counting signal</label><select id="pRep">${sigOptions(it, P.repeatSig, poly ? `<option value="window" ${P.repeatSig === 'window' ? 'selected' : ''}>Standard window: ${esc(poly.signal.label)}, δ ${poly.signal.from}–${poly.signal.to}</option>` : '')}</select></div>
+    <div class="row"><label>H per unit · M₀ (g/mol)</label><div class="pair"><input id="pRepH" type="number" min="0.1" step="any" value="${P.repeatH}" aria-label="Protons per repeat unit"><input id="pM0" type="number" min="0" step="any" value="${P.m0}" aria-label="Repeat unit mass"></div></div>
+    ${repeatInt != null ? `<p class="assign alt">Integral of counting signal: <b class="mono">${fmt(repeatInt)}</b> on the current scale.</p>` : ''}
+  </div></div>
+  <div class="section"><h3>End group</h3><div class="poly">
+    <div class="row"><label for="pEnd">Type</label><select id="pEnd">${NMR.END_GROUPS.map((g) => `<option value="${g.id}" ${g.id === P.end ? 'selected' : ''}>${esc(g.name)}${g.ppm ? ' · ' + esc(g.ppm) : ''}</option>`).join('')}</select></div>
+    <div class="row"><label for="pEndSig">Its signal</label><select id="pEndSig">${sigOptions(it, P.endSig)}</select></div>
+    <div class="row"><label>H in signal · ends/chain</label><div class="pair"><input id="pEndH" type="number" min="0.1" step="any" value="${P.endH}" aria-label="Protons in end-group signal"><input id="pEndN" type="number" min="1" step="1" value="${P.endCount}" aria-label="End groups per chain"></div></div>
+    <div class="row"><label for="pEndM">End-group mass, both ends (g/mol)</label><input id="pEndM" type="number" min="0" step="any" value="${P.endMass}"></div>
+    <p class="assign alt">End-group signals are usually small. If yours is not in the list, choose <b>Integrate</b> in the toolbar and drag across it.</p>
+  </div></div>`;
+  out += `<div class="section"><h3>Degree of polymerisation</h3>${dp ? `<div class="result">
+      <span class="sub">DP<sub>n</sub> (number-average repeat units per chain)</span><span class="big">${fmt(dp.dp, 1)}</span>
+      ${dp.mn ? `<span class="sub">M<sub>n</sub> = DP × M₀ + M<sub>end</sub> = ${fmt(dp.dp, 1)} × ${fmt(P.m0)} + ${fmt(P.endMass)}</span><span class="big">${Math.round(dp.mn).toLocaleString('en-US')} g/mol</span>` : ''}
+      <span class="sub">(∫repeat / ${P.repeatH}H) ÷ (∫end / ${P.endH * P.endCount}H)</span>
+      <button class="btn small" id="copyPoly" type="button" style="justify-self:start">Copy result</button>
+    </div>` : '<p class="assign alt">Choose a counting signal and an end-group signal to get DP and Mn.</p>'}</div>`;
+  if (micro) {
+    out += `<div class="section"><h3>Microstructure</h3>${micro.rows.map((r) => `<div style="display:grid;gap:3px;margin-bottom:6px"><div style="display:flex;justify-content:space-between"><span>${esc(r.label)} <span class="alt">${esc(r.how)}</span></span><b class="mono">${fmt(r.pct, 1)}%</b></div><div class="pctbar"><i style="width:${Math.min(100, r.pct)}%"></i></div></div>`).join('')}
+      ${micro.cisTrans ? `<p class="assign">1,4 cis : trans ≈ <b class="mono">${fmt(micro.cisTrans.cis, 0)} : ${fmt(micro.cisTrans.trans, 0)}</b></p>` : ''}
+      <p class="assign alt">${esc(micro.note)}</p></div>`;
+  }
+  out += `<div class="section"><h3>Copolymer composition</h3>
+    ${P.comps.map((c, i) => `<div class="comp-row poly" style="margin-bottom:4px">
+      <input data-c="${i}" data-f="name" type="text" value="${esc(c.name)}" aria-label="Monomer name">
+      <select data-c="${i}" data-f="sig" aria-label="Signal">${sigOptions(it, c.sig)}</select>
+      <input data-c="${i}" data-f="nH" type="number" min="0.1" step="any" value="${c.nH}" aria-label="H per unit" title="H per unit">
+      <input data-c="${i}" data-f="m0" type="number" min="0" step="any" value="${c.m0}" aria-label="Unit mass" title="Unit mass (g/mol)">
+      <button class="x" data-crm="${i}" type="button" aria-label="Remove">×</button></div>`).join('')}
+    <div class="formula"><select id="pAddMon" aria-label="Add monomer"><option value="">Add a monomer…</option>${NMR.POLYMERS.map((p) => `<option value="${p.id}">${esc(p.name.replace(/^Poly\(?|\)$/g, ''))}</option>`).join('')}<option value="custom">Custom</option></select></div>
+    ${comp.length >= 2 ? `<table class="sig" style="margin-top:8px"><thead><tr><th>Unit</th><th>mol %</th><th>wt %</th></tr></thead><tbody>${comp.map((c) => `<tr><td>${esc(c.name)}</td><td class="mono">${fmt(c.molPct, 1)}</td><td class="mono">${c.wtPct == null ? '–' : fmt(c.wtPct, 1)}</td></tr>`).join('')}</tbody></table>` : '<p class="assign alt">Add two or more monomers, each with a signal that belongs only to it, to get mole and weight fractions.</p>'}
+  </div>`;
+  state.polySummary = summary;
+  return out;
+}
+
+function bindPolymer(it) {
+  const P = polyState(it);
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  const redraw = () => renderTab();
+  on('pPoly', 'change', (e) => {
+    P.polymer = e.target.value;
+    const p = NMR.POLYMERS.find((x) => x.id === P.polymer);
+    if (p) { P.repeatH = p.signal.nH; P.m0 = +p.m0.toFixed(2); P.repeatSig = 'window'; } else if (P.repeatSig === 'window') P.repeatSig = '';
+    redraw();
+  });
+  on('pRep', 'change', (e) => { P.repeatSig = e.target.value; redraw(); });
+  on('pRepH', 'change', (e) => { P.repeatH = +e.target.value || 1; redraw(); });
+  on('pM0', 'change', (e) => { P.m0 = +e.target.value || 0; redraw(); });
+  on('pEnd', 'change', (e) => {
+    P.end = e.target.value;
+    const g = NMR.END_GROUPS.find((x) => x.id === P.end);
+    if (g && g.id !== 'custom') { P.endH = g.nH; P.endMass = +g.mass.toFixed(2); }
+    redraw();
+  });
+  on('pEndSig', 'change', (e) => { P.endSig = e.target.value; redraw(); });
+  on('pEndH', 'change', (e) => { P.endH = +e.target.value || 1; redraw(); });
+  on('pEndN', 'change', (e) => { P.endCount = Math.max(1, Math.round(+e.target.value || 1)); redraw(); });
+  on('pEndM', 'change', (e) => { P.endMass = +e.target.value || 0; redraw(); });
+  on('pAddMon', 'change', (e) => {
+    const p = NMR.POLYMERS.find((x) => x.id === e.target.value);
+    const sig = p ? polySignals(it).find((m) => m.ppm <= p.signal.from && m.ppm >= p.signal.to) : null;
+    P.comps.push(p ? { name: p.name.replace(/^Poly\(?|\)$/g, ''), sig: sig ? sigKey(sig) : '', nH: p.signal.nH, m0: +p.m0.toFixed(2) } : { name: 'Monomer', sig: '', nH: 1, m0: 100 });
+    redraw();
+  });
+  for (const el of $('tabbody').querySelectorAll('[data-c]')) el.addEventListener('change', () => {
+    const c = P.comps[+el.dataset.c], f = el.dataset.f;
+    c[f] = f === 'name' || f === 'sig' ? el.value : +el.value || 0;
+    redraw();
+  });
+  for (const b of $('tabbody').querySelectorAll('[data-crm]')) b.addEventListener('click', () => { P.comps.splice(+b.dataset.crm, 1); redraw(); });
+  on('copyPoly', 'click', () => {
+    const t = state.polySummary;
+    try { navigator.clipboard.writeText(t).then(() => toast('Result copied'), () => toast(t)); } catch (e) { toast(t); }
+  });
+  // Highlight the chosen signals on the spectrum.
+  const hl = [P.repeatSig !== 'window' && P.repeatSig, P.endSig].filter(Boolean).map((k) => sigArea(it, k)).filter(Boolean);
+  viewer.highlight = hl.length ? hl[hl.length - 1].m : null; viewer.draw();
 }
 
 function suggestRef(it, ppm) {
@@ -301,13 +433,13 @@ function updateBands() {
 function bindTab(it) {
   const body = $('tabbody');
   if (state.tab === 'signals') {
-    const sigs = it.result.analysis.multiplets.filter((m) => !m.minor || m.manual);
+    const sigs = visibleSignals(it);
     for (const tr of body.querySelectorAll('tr[data-k]')) {
       const m = sigs[+tr.dataset.k];
       tr.addEventListener('mouseenter', () => { viewer.highlight = m; viewer.draw(); });
       tr.addEventListener('mouseleave', () => { viewer.highlight = state.hoverSig; viewer.draw(); });
       tr.addEventListener('click', (e) => {
-        if (e.target.closest('[data-ex]')) return;
+        if (e.target.closest('[data-ex],[data-rm],[data-nh]')) return;
         const w = Math.max(m.ppmFrom - m.ppmTo, /13C/.test(it.ds.nucleus) ? 1 : 0.05);
         state.hoverSig = m; viewer.highlight = m;
         viewer.zoomTo(m.ppmFrom + w * 1.2, m.ppmTo - w * 1.2);
@@ -323,6 +455,23 @@ function bindTab(it) {
     });
     const f = $('formula');
     if (f) f.addEventListener('change', () => { it.session.params.formula = f.value.trim(); rerun(); });
+    for (const inp of body.querySelectorAll('[data-nh]')) inp.addEventListener('change', () => {
+      const v = parseFloat(inp.value);
+      const m = sigs[+inp.dataset.nh];
+      it.session.params.integralRef = v > 0 ? { ppm: m.ppm, value: v } : null;
+      rerun(); toast(v > 0 ? `Integral at ${m.ppm.toFixed(2)} ppm set to ${v}` : 'Normalisation reset');
+    });
+    for (const b of body.querySelectorAll('[data-rm]')) b.addEventListener('click', () => {
+      const m = sigs[+b.dataset.rm];
+      const mr = it.session.params.manualRegions;
+      const k = mr.findIndex(([a, c]) => Math.abs(Math.max(a, c) - m.ppmFrom) < 1e-6 && Math.abs(Math.min(a, c) - m.ppmTo) < 1e-6);
+      if (k >= 0) mr.splice(k, 1);
+      rerun();
+    });
+    const tm = $('toggleMinor');
+    if (tm) tm.addEventListener('click', () => { state.showMinor = !state.showMinor; renderTab(); });
+    const cn = $('clearNorm');
+    if (cn) cn.addEventListener('click', () => { it.session.params.integralRef = null; rerun(); });
     const cm = $('clearManual');
     if (cm) cm.addEventListener('click', () => { it.session.params.manualRegions = []; rerun(); });
   }
@@ -338,6 +487,7 @@ function bindTab(it) {
       viewer.draw(); renderTab();
     });
   }
+  if (state.tab === 'polymer') bindPolymer(it);
   if (state.tab === 'info') {
     const ap = $('applyRef');
     if (ap) ap.addEventListener('click', () => {

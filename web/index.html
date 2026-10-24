@@ -1,0 +1,251 @@
+<title>NMRemView</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: instrument-style workbench. Library rail | spectrum + processing | analysis panel. */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --plot: #fcfdfd;
+  --fg: #16202b;
+  --muted: #5d6b79;
+  --line: #d5dce3;
+  --grid: #eaeef2;
+  --trace: #18306b;
+  --accent: #0e7c86;
+  --accent-ink: #ffffff;
+  --integral: #c4561b;
+  --band: rgba(14, 124, 134, 0.11);
+  --band-ink: #0b5f67;
+  --hl: rgba(196, 86, 27, 0.10);
+  --select: rgba(24, 48, 107, 0.10);
+  --stick: #b0287a;
+  --solvent: #8a96a3;
+  --chip: #e3e9ee;
+  --warn: #9a6200;
+  --ok: #1f7a43;
+  --font-ui: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "IBM Plex Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151b; --surface: #161e26; --plot: #121a21; --fg: #e3e9ef; --muted: #8e9dab; --line: #27323d; --grid: #1c252e;
+    --trace: #8fb4ff; --accent: #3fb8c2; --accent-ink: #061417; --integral: #f0905a; --band: rgba(63, 184, 194, 0.13); --band-ink: #7fd6dd;
+    --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151b; --surface: #161e26; --plot: #121a21; --fg: #e3e9ef; --muted: #8e9dab; --line: #27323d; --grid: #1c252e;
+  --trace: #8fb4ff; --accent: #3fb8c2; --accent-ink: #061417; --integral: #f0905a; --band: rgba(63, 184, 194, 0.13); --band-ink: #7fd6dd;
+  --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 13px; }
+* { box-sizing: border-box; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100%; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 12px; gap: 10px; }
+header.top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-block: 10px 0; }
+.brand { display: flex; align-items: baseline; gap: 8px; }
+.brand h1 { font-family: var(--font-display); font-weight: 700; font-size: 21px; letter-spacing: 0.01em; margin: 0; }
+.brand h1 span { color: var(--accent); }
+.pill { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; background: var(--chip); color: var(--muted); }
+.top .spacer { flex: 1; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 6px 11px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn.on { background: var(--fg); color: var(--surface); border-color: var(--fg); }
+.btn.small { padding: 3px 8px; font-size: 12px; }
+select.btn { padding-right: 8px; }
+
+.work { display: grid; grid-template-columns: 210px minmax(0, 1fr) 360px; gap: 10px; min-height: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.panel h2 { font-family: var(--font-display); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0; padding: 10px 12px 6px; }
+
+/* Library */
+.lib { overflow: auto; }
+.lib-list { display: flex; flex-direction: column; gap: 2px; padding: 0 6px 6px; }
+.lib-item { text-align: left; border: 0; background: transparent; border-radius: 6px; padding: 7px 8px; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; }
+.lib-item:hover { background: var(--chip); }
+.lib-item.active { background: var(--select); }
+.nuc { font-family: var(--font-mono); font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: var(--trace); color: var(--surface); grid-row: span 2; }
+.nuc.c13 { background: var(--integral); }
+.lib-item .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-item .sub { color: var(--muted); font-size: 11px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop { margin: auto 8px 8px; border: 1.5px dashed var(--line); border-radius: 8px; padding: 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.drop strong { color: var(--fg); }
+.samples { padding: 0 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+.samples button { text-align: left; border: 0; background: none; padding: 5px 8px; border-radius: 5px; color: var(--accent); font-size: 12px; }
+.samples button:hover { background: var(--chip); }
+
+/* Centre */
+.centre { display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.tgroup { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
+.tgroup label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+.tgroup input[type=range] { width: 92px; accent-color: var(--accent); }
+.tgroup input[type=number], .tgroup input[type=text] { width: 64px; border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; background: var(--plot); font-family: var(--font-mono); font-size: 12px; }
+.val { font-family: var(--font-mono); font-size: 11px; min-width: 40px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.plotwrap { position: relative; min-height: 260px; }
+.plotwrap canvas { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+.readout { position: absolute; right: 10px; top: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); background: var(--plot); padding: 2px 6px; border-radius: 4px; pointer-events: none; }
+.modehint { position: absolute; left: 12px; bottom: 4px; right: 40px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--muted); pointer-events: none; }
+.report { border-top: 1px solid var(--line); padding: 8px 10px; display: flex; gap: 10px; align-items: flex-start; }
+.report p { margin: 0; flex: 1; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 20px; }
+
+/* Right panel */
+.tabs { display: flex; border-bottom: 1px solid var(--line); padding: 0 6px; overflow-x: auto; }
+.tabs button { border: 0; background: none; padding: 10px 10px 8px; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs button.active { color: var(--fg); border-bottom-color: var(--accent); }
+.tabbody { overflow: auto; padding: 10px 12px 16px; min-height: 0; flex: 1; }
+table.sig { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.sig th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; padding: 4px 4px; border-bottom: 1px solid var(--line); position: sticky; top: -10px; background: var(--surface); }
+table.sig td { padding: 6px 4px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+table.sig tr { cursor: pointer; }
+table.sig tr:hover td, table.sig tr.hl td { background: var(--hl); }
+table.sig tr.muted td { color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+.mult { font-family: var(--font-mono); font-weight: 600; }
+.assign { font-size: 12px; line-height: 1.35; }
+.assign .alt { color: var(--muted); font-size: 11px; }
+.flag { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: var(--chip); color: var(--muted); margin-top: 2px; }
+.flag.impurity { color: var(--warn); }
+.x { border: 0; background: none; color: var(--muted); padding: 0 2px; }
+.section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+.section h3 { font-family: var(--font-display); font-size: 13px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
+.hint { border-left: 3px solid var(--accent); padding: 4px 0 4px 9px; }
+.hint b { font-weight: 600; }
+.hint div { color: var(--muted); font-size: 12px; font-family: var(--font-mono); margin-top: 2px; }
+.cmp { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; align-items: center; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: none; text-align: left; }
+.cmp.on { border-color: var(--stick); }
+.cmp .bar { grid-column: 1 / -1; height: 4px; background: var(--chip); border-radius: 2px; overflow: hidden; }
+.cmp .bar i { display: block; height: 100%; background: var(--accent); }
+.cmp small { color: var(--muted); font-family: var(--font-mono); }
+.search { display: flex; gap: 6px; }
+.search input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; background: var(--plot); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chips button { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 2px 9px; font-size: 12px; }
+.chips button:hover { border-color: var(--accent); color: var(--accent); }
+.grp { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.grp.on { border-color: var(--accent); background: var(--band); }
+.grp .rng { font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
+.grp .note { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.grp .scale { grid-column: 1 / -1; position: relative; height: 8px; background: var(--chip); border-radius: 4px; }
+.grp .scale i { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 4px; opacity: 0.75; }
+.grp .scale b { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--integral); }
+.grp .hits { grid-column: 1 / -1; font-size: 12px; font-family: var(--font-mono); color: var(--ok); }
+.grp .hits.none { color: var(--muted); }
+.nucsmall { font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--muted); }
+.elcard { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+.elsym { font-family: var(--font-display); font-size: 34px; font-weight: 700; line-height: 1; color: var(--accent); grid-row: span 2; }
+.elcard table { grid-column: 1 / -1; width: 100%; font-family: var(--font-mono); font-size: 11px; border-collapse: collapse; }
+.elcard td, .elcard th { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--grid); }
+.elcard th { color: var(--muted); font-weight: 500; }
+.elcard p { grid-column: 1 / -1; margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+details summary { cursor: pointer; font-weight: 600; font-family: var(--font-display); }
+details table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+details td { padding: 3px 4px; border-bottom: 1px solid var(--grid); }
+details td.mono { white-space: nowrap; }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--surface); padding: 8px 14px; border-radius: 6px; font-size: 12px; z-index: 20; }
+.warns { color: var(--warn); font-size: 12px; padding: 0 12px 8px; }
+.dragover .plotwrap { outline: 2px dashed var(--accent); outline-offset: -6px; }
+.formula { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.formula input { width: 120px; border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; background: var(--plot); font-family: var(--font-mono); }
+
+@media (max-width: 1180px) {
+  .work { grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: minmax(420px, 1fr) auto; }
+  .right { grid-column: 1 / -1; max-height: 70vh; }
+}
+@media (max-width: 720px) {
+  html, body { height: auto; }
+  .app { height: auto; }
+  .work { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  .lib { max-height: 240px; }
+  .centre .plotwrap { min-height: 340px; }
+  .right { max-height: none; }
+  .tgroup input[type=range] { width: 70px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app" id="app">
+  <header class="top">
+    <div class="brand"><h1>NMR<span>em</span>View</h1><span class="pill">Web trial</span></div>
+    <button class="btn primary" id="openBtn" type="button">Open NMR data…</button>
+    <input type="file" id="fileInput" multiple hidden accept=".zip,.jdx,.dx,.jcamp,.csv,.txt,.tsv,.asc,.xy,*">
+    <input type="file" id="dirInput" webkitdirectory multiple hidden>
+    <button class="btn" id="openDir" type="button">Open folder…</button>
+    <span class="spacer"></span>
+    <span class="pill" id="status">Ready</span>
+  </header>
+
+  <main class="work">
+    <section class="panel lib" aria-label="Spectra">
+      <h2>Spectra</h2>
+      <div class="lib-list" id="libList"></div>
+      <div class="warns" id="warns" hidden></div>
+      <h2>Example data</h2>
+      <div class="samples" id="samples"></div>
+      <div class="drop"><strong>Drop files anywhere.</strong> Bruker experiment folders or .zip, Varian/Agilent .fid folders, JCAMP-DX (.jdx, .dx), or two-column CSV/TXT. Files stay in your browser.</div>
+    </section>
+
+    <section class="panel centre" aria-label="Spectrum">
+      <div class="toolbar" id="toolbar">
+        <div class="tgroup" role="group" aria-label="View">
+          <button class="btn small on" data-mode="zoom" type="button" title="Drag to zoom. Shift-drag to pan. Double-click to reset.">Zoom</button>
+          <button class="btn small" data-mode="integrate" type="button" title="Drag across a signal to integrate it">Integrate</button>
+          <button class="btn small" data-mode="reference" type="button" title="Click a peak, then type its true shift">Reference</button>
+          <button class="btn small" id="zoomOut" type="button" aria-label="Zoom out">−</button>
+          <button class="btn small" id="resetView" type="button">Fit</button>
+        </div>
+        <div class="tgroup" id="phaseGroup">
+          <label for="ph0">PH0</label><input type="range" id="ph0" min="-180" max="180" step="0.5"><span class="val" id="ph0v"></span>
+          <label for="ph1">PH1</label><input type="range" id="ph1" min="-360" max="360" step="1"><span class="val" id="ph1v"></span>
+          <button class="btn small" id="autoPhase" type="button">Auto phase</button>
+        </div>
+        <div class="tgroup">
+          <label for="lb">LB</label><input type="number" id="lb" step="0.1" min="0" max="20"><span class="val">Hz</span>
+          <label for="snr">Peak S/N</label><input type="range" id="snr" min="3" max="60" step="1"><span class="val" id="snrv"></span>
+        </div>
+        <div class="tgroup">
+          <button class="btn small" id="baseline" type="button">Baseline</button>
+          <button class="btn small" id="labels" type="button">Labels</button>
+          <button class="btn small" id="curves" type="button">Integrals</button>
+          <button class="btn small" id="reverse" type="button" title="Mirror the spectrum if a vendor records the opposite quadrature sense">Mirror</button>
+        </div>
+      </div>
+      <div class="plotwrap" id="plotwrap">
+        <canvas id="plot" aria-label="NMR spectrum plot"></canvas>
+        <div class="readout" id="readout"></div>
+        <div class="modehint" id="modehint">Drag to zoom · shift-drag to pan · scroll for intensity · ctrl-scroll or pinch to zoom · double-click to fit</div>
+        <div class="empty" id="empty" hidden>Open or drop an NMR file to begin.</div>
+      </div>
+      <div class="report">
+        <p id="report"></p>
+        <button class="btn small" id="copyReport" type="button">Copy</button>
+      </div>
+    </section>
+
+    <section class="panel right" aria-label="Analysis">
+      <div class="tabs" role="tablist" id="tabs">
+        <button data-tab="signals" class="active" type="button" role="tab">Signals</button>
+        <button data-tab="suggest" type="button" role="tab">Suggestions</button>
+        <button data-tab="lookup" type="button" role="tab">Shift lookup</button>
+        <button data-tab="info" type="button" role="tab">Info</button>
+      </div>
+      <div class="tabbody" id="tabbody"></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="app.js"></script>

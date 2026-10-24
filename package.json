@@ -1,0 +1,14 @@
+{
+  "name": "nmremview",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NMRemView: 1H/13C NMR processing and analysis core, web trial and macOS app",
+  "scripts": {
+    "build:web": "node scripts/build-web.mjs",
+    "build:core": "node scripts/build-core-bundle.mjs",
+    "serve": "node scripts/build-web.mjs && cd dist/web && python3 -m http.server 8765",
+    "test": "node tests/run-all.mjs"
+  },
+  "license": "UNLICENSED"
+}

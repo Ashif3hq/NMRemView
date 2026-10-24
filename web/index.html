@@ -21,6 +21,7 @@
   --hl: rgba(196, 86, 27, 0.10);
   --select: rgba(24, 48, 107, 0.10);
   --stick: #b0287a;
+  --note: #6a3ea1;
   --solvent: #8a96a3;
   --chip: #e3e9ee;
   --warn: #9a6200;
@@ -33,14 +34,14 @@
   :root:not([data-theme="light"]) {
     --bg: #0f151b; --surface: #161e26; --plot: #121a21; --fg: #e3e9ef; --muted: #8e9dab; --line: #27323d; --grid: #1c252e;
     --trace: #8fb4ff; --accent: #3fb8c2; --accent-ink: #061417; --integral: #f0905a; --band: rgba(63, 184, 194, 0.13); --band-ink: #7fd6dd;
-    --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
+    --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --note: #c4a3f2; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f151b; --surface: #161e26; --plot: #121a21; --fg: #e3e9ef; --muted: #8e9dab; --line: #27323d; --grid: #1c252e;
   --trace: #8fb4ff; --accent: #3fb8c2; --accent-ink: #061417; --integral: #f0905a; --band: rgba(63, 184, 194, 0.13); --band-ink: #7fd6dd;
-  --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
+  --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --note: #c4a3f2; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
   color-scheme: dark;
 }
 html, body { height: 100%; }
@@ -117,6 +118,7 @@ table.sig tr.muted td { color: var(--muted); }
 .assign .alt { color: var(--muted); font-size: 11px; }
 .flag { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: var(--chip); color: var(--muted); margin-top: 2px; }
 .flag.impurity { color: var(--warn); }
+.flag.note { color: var(--note); }
 .x { border: 0; background: none; color: var(--muted); padding: 0 2px; }
 .section { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
 .section h3 { font-family: var(--font-display); font-size: 13px; font-weight: 600; margin: 0; letter-spacing: 0.02em; }
@@ -156,6 +158,25 @@ details summary { cursor: pointer; font-weight: 600; font-family: var(--font-dis
 details table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
 details td { padding: 3px 4px; border-bottom: 1px solid var(--grid); }
 details td.mono { white-space: nowrap; }
+.tgroup.tools { gap: 2px; padding-right: 10px; border-right: 1px solid var(--line); }
+.tgroup.tools:last-of-type { border-right: 0; }
+.tool { min-width: 30px; justify-content: center; }
+.tool kbd { font-family: var(--font-mono); font-size: 9px; opacity: 0.6; }
+.btn:disabled { opacity: 0.4; }
+.pop { position: absolute; z-index: 5; display: flex; gap: 4px; align-items: center; padding: 6px; background: var(--surface); border: 1px solid var(--note); border-radius: 7px; box-shadow: 0 4px 16px rgba(0,0,0,0.14); max-width: calc(100% - 16px); }
+.pop span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.pop input { width: 150px; min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; background: var(--plot); color: var(--fg); font-size: 12px; }
+.pop input[type=number] { width: 80px; font-family: var(--font-mono); }
+.menu { position: absolute; z-index: 6; display: flex; flex-direction: column; min-width: 190px; padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 4px 16px rgba(0,0,0,0.14); }
+.menu button { border: 0; background: none; text-align: left; padding: 6px 9px; border-radius: 5px; font-size: 12px; color: var(--fg); }
+.menu button:hover { background: var(--chip); }
+.dlg { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(10, 16, 22, 0.45); padding: 16px; }
+.dlg > div { background: var(--surface); color: var(--fg); border-radius: 10px; padding: 14px; width: min(720px, 100%); max-height: 90vh; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dlg h3 { margin: 0; font-family: var(--font-display); font-size: 15px; }
+.dlg textarea { width: 100%; min-height: 240px; font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: var(--plot); color: var(--fg); resize: vertical; }
+.dlg img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--plot); }
+.dlg .row { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.picker { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--surface); padding: 8px 14px; border-radius: 6px; font-size: 12px; z-index: 20; }
 .warns { color: var(--warn); font-size: 12px; padding: 0 12px 8px; }
 .dragover .plotwrap { outline: 2px dashed var(--accent); outline-offset: -6px; }
@@ -220,12 +241,27 @@ tr.ref .nh-in { border-color: var(--accent); }
 
     <section class="panel centre" aria-label="Spectrum">
       <div class="toolbar" id="toolbar">
-        <div class="tgroup" role="group" aria-label="View">
-          <button class="btn small on" data-mode="zoom" type="button" title="Drag to zoom. Shift-drag to pan. Double-click to reset.">Zoom</button>
-          <button class="btn small" data-mode="integrate" type="button" title="Drag across a signal to integrate it">Integrate</button>
-          <button class="btn small" data-mode="reference" type="button" title="Click a peak, then type its true shift">Reference</button>
-          <button class="btn small" id="zoomOut" type="button" aria-label="Zoom out">−</button>
-          <button class="btn small" id="resetView" type="button">Fit</button>
+        <div class="tgroup tools" role="group" aria-label="View">
+          <button class="btn small tool on" data-mode="zoom" type="button" title="Zoom (Z): drag to zoom, double-click to fit">Zoom</button>
+          <button class="btn small tool" data-mode="pan" type="button" title="Pan (H): drag to move along the spectrum">Pan</button>
+          <button class="btn small tool" id="zoomOut" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+          <button class="btn small tool" id="resetView" type="button" title="Fit (F)">Fit</button>
+        </div>
+        <div class="tgroup tools" role="group" aria-label="Analysis tools">
+          <button class="btn small tool" data-mode="peakAdd" type="button" title="Peak pick (K): click a peak, or drag over a region, to mark it">Peak +</button>
+          <button class="btn small tool" data-mode="peakDel" type="button" title="Delete peaks (X): click a peak label, or drag over a region">Peak −</button>
+          <button class="btn small tool" data-mode="integrate" type="button" title="Integrate (I): drag across a signal">∫ Integrate</button>
+          <button class="btn small tool" data-mode="setint" type="button" title="Reference integral (N): click a signal and type its number of protons; all integrals scale with it">∫ = n</button>
+          <button class="btn small tool" data-mode="reference" type="button" title="Reference shift (R): click TMS or the solvent residual and type its true shift">δ ref</button>
+        </div>
+        <div class="tgroup tools" role="group" aria-label="Annotation">
+          <button class="btn small tool" data-mode="label" type="button" title="Label (L): click a signal to name it, e.g. CH₂–S end group">Label</button>
+          <button class="btn small tool" data-mode="note" type="button" title="Note (T): click anywhere on the plot to add text">Note</button>
+        </div>
+        <div class="tgroup tools" role="group" aria-label="Edit">
+          <button class="btn small tool" id="undo" type="button" title="Undo (Ctrl/⌘ Z)" aria-label="Undo">↶</button>
+          <button class="btn small tool" id="redo" type="button" title="Redo (Ctrl/⌘ Shift Z)" aria-label="Redo">↷</button>
+          <button class="btn small tool" id="exportBtn" type="button" title="Export the plot, peak list or integrals">Export ▾</button>
         </div>
         <div class="tgroup" id="phaseGroup">
           <label for="ph0">PH0</label><input type="range" id="ph0" min="-180" max="180" step="0.5"><span class="val" id="ph0v"></span>
@@ -247,6 +283,13 @@ tr.ref .nh-in { border-color: var(--accent); }
         <canvas id="plot" aria-label="NMR spectrum plot"></canvas>
         <div class="readout" id="readout"></div>
         <div class="modehint" id="modehint">Drag to zoom · shift-drag to pan · scroll for intensity · ctrl-scroll or pinch to zoom · double-click to fit</div>
+        <div class="pop" id="pop" hidden></div>
+        <div class="menu" id="exportMenu" hidden>
+          <button data-ex="png" type="button">Plot as PNG image</button>
+          <button data-ex="peaks" type="button">Peak list (CSV)</button>
+          <button data-ex="ints" type="button">Integrals and labels (CSV)</button>
+          <button data-ex="report" type="button">Report text</button>
+        </div>
         <div class="empty" id="empty" hidden>Open or drop an NMR file to begin.</div>
       </div>
       <div class="report">
@@ -268,4 +311,9 @@ tr.ref .nh-in { border-color: var(--accent); }
   </main>
 </div>
 <div class="toast" id="toast" hidden></div>
+<div class="dlg" id="dlg" hidden><div role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
+  <h3 id="dlgTitle"></h3>
+  <div id="dlgBody"></div>
+  <div class="row"><button class="btn small" id="dlgCopy" type="button">Copy</button><button class="btn small" id="dlgSave" type="button">Download</button><button class="btn small primary" id="dlgClose" type="button">Close</button></div>
+</div></div>
 <script type="module" src="app.js"></script>

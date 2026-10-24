@@ -19,6 +19,10 @@ export function createSession(ds) {
     manualRegions: [],
     // { ppm, value }: the integral containing ppm is set to value and all others scale with it.
     integralRef: null,
+    // Manual peak picking, stored on the unreferenced scale so re-referencing keeps them in place.
+    peakEdits: { add: [], remove: [] },
+    // Labels on signals and free notes: [{ ppm, text, kind: 'label' | 'note', yFrac }], also unreferenced.
+    annotations: [],
     // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
     autoReference: !!ds.fid && ['jeol', 'nmrpipe', 'magritek', 'nmrml', 'mnova'].includes(ds.fid.origin),
     excluded: [],
@@ -66,6 +70,7 @@ export function createSession(ds) {
         a = analyse(spec, { snr: params.snr });
       }
     }
+    applyPeakEdits(spec, a, params);
     let signals = a.multiplets;
     // Manual integral regions replace any automatic regions they overlap.
     if (params.manualRegions.length && /1H/.test(spec.nucleus)) {
@@ -113,6 +118,40 @@ export function createSession(ds) {
     },
     run,
   };
+}
+
+// Add peaks the user marked (snapped to the local maximum) and drop the ones they removed.
+function applyPeakEdits(spec, a, params) {
+  const { add, remove } = params.peakEdits || { add: [], remove: [] };
+  if (!add.length && !remove.length) return;
+  const is13 = /13C/.test(spec.nucleus);
+  const tol = is13 ? 0.05 : 0.004;
+  const shift = params.referenceShift;
+  a.peaks = a.peaks.filter((p) => !remove.some((r) => Math.abs(r + shift - p.ppm) < tol));
+  const ax = ppmAxis(spec);
+  const y = spec.real;
+  for (const raw of add) {
+    const ppm = raw + shift;
+    if (a.peaks.some((p) => Math.abs(p.ppm - ppm) < tol)) continue;
+    const i = Math.round(ax.index(ppm));
+    if (i < 1 || i >= y.length - 1) continue;
+    a.peaks.push({ index: i, ppm: ax.at(i), height: y[i], widthHz: 0, snr: a.noise ? y[i] / a.noise : 0, manual: true });
+  }
+  a.peaks.sort((p, q) => q.ppm - p.ppm);
+  if (is13) {
+    a.multiplets = a.peaks.map((p) => ({ ppm: p.ppm, ppmFrom: p.ppm + 0.15, ppmTo: p.ppm - 0.15, area: p.height, height: p.height, multiplicity: 's', J: [], lines: [p.ppm], peaks: [p] }));
+  }
+}
+
+// Snap a click to the nearest local maximum (within ±0.02 ppm for 1H, ±0.3 for 13C).
+export function snapToPeak(spec, ppm) {
+  const ax = ppmAxis(spec);
+  const y = spec.real;
+  const w = Math.max(2, Math.round((/13C/.test(spec.nucleus) ? 0.3 : 0.02) / Math.abs(ax.step)));
+  const c = Math.round(ax.index(ppm));
+  let best = c;
+  for (let i = Math.max(1, c - w); i <= Math.min(y.length - 2, c + w); i++) if (y[i] > y[best]) best = i;
+  return ax.at(best);
 }
 
 // Offset that moves the solvent residual signal onto its literature shift (0 if not found).

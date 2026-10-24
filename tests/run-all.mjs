@@ -29,6 +29,24 @@ for (const c of cases) {
   console.log(ok ? 'ok  ' : 'FAIL', 'polymer DP / composition maths');
   if (!ok) fail++;
 }
+// Manual peak picking: a removed peak stays gone, an added one snaps to a maximum and survives re-referencing.
+{
+  const { datasets } = await N.loadFiles(new Map([['aspirin-1h.zip', new Uint8Array(fs.readFileSync('web/samples/aspirin-1h.zip'))]]));
+  const s = N.createSession(datasets[0]);
+  const r0 = s.run();
+  const victim = r0.analysis.peaks[0];
+  const snapped = N.snapToPeak(r0.spectrum, 5.0);
+  s.params.peakEdits = { add: [snapped - s.params.referenceShift], remove: [victim.ppm - s.params.referenceShift] };
+  const r1 = s.run();
+  const gone = !r1.analysis.peaks.some((p) => Math.abs(p.ppm - victim.ppm) < 1e-4);
+  const added = r1.analysis.peaks.some((p) => p.manual && Math.abs(p.ppm - snapped) < 1e-3);
+  s.params.referenceShift += 0.1;
+  const r2 = s.run();
+  const moved = r2.analysis.peaks.some((p) => p.manual && Math.abs(p.ppm - (snapped + 0.1)) < 2e-3);
+  const ok = gone && added && moved;
+  console.log(ok ? 'ok  ' : 'FAIL', 'manual peak add / remove', ok ? '' : JSON.stringify({ gone, added, moved }));
+  if (!ok) fail++;
+}
 // Private documents (not in git): every .mnova in tests/private must yield spectra.
 const priv = new URL('./private/', import.meta.url);
 if (fs.existsSync(priv)) for (const f of fs.readdirSync(priv).filter((x) => /\.mnova$/i.test(x))) {

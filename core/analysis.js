@@ -120,7 +120,11 @@ export function integrateRange(spec, ppmA, ppmB, opts = {}) {
   if (opts.local && b > a) {
     const w = Math.max(1, Math.round(0.01 / Math.abs(ax.step)));
     const avg = (i) => { let s = 0, c = 0; for (let k = Math.max(0, i - w); k <= Math.min(y.length - 1, i + w); k++) { s += y[k]; c++; } return s / c; };
-    ya = avg(a); yb = avg(b);
+    // An edge drawn on a peak's flank would lift the baseline and make the area negative, so each
+    // end takes the lowest smoothed level in its outer quarter of the region if that is lower.
+    const q = Math.max(1, Math.floor((b - a) / 4));
+    const low = (i0, i1) => { let m = Infinity; for (let i = i0; i <= i1; i += Math.max(1, Math.floor(w / 2))) m = Math.min(m, avg(i)); return m; };
+    ya = Math.min(avg(a), low(a, a + q)); yb = Math.min(avg(b), low(b - q, b));
   }
   let s = 0;
   for (let k = a; k <= b; k++) s += y[k] - (ya + ((yb - ya) * (k - a)) / Math.max(1, b - a));

@@ -24,24 +24,8 @@ const viewer = new SpectrumViewer($('plot'), {
     const it = cur();
     $('readout').textContent = ppm == null || !it ? '' : `δ ${ppm.toFixed(/13C/.test(it.ds.nucleus) ? 2 : 3)} ppm${it.ds.frequency ? ` · ${(ppm * it.ds.frequency).toFixed(1)} Hz` : ''}`;
   },
-  onRange: (a, b) => {
-    const it = cur(); if (!it) return;
-    it.session.params.manualRegions.push([a, b]);
-    rerun(); toast(`Integrated ${a.toFixed(2)} – ${b.toFixed(2)} ppm`);
-  },
-  onClickPpm: (ppm) => {
-    const it = cur(); if (!it) return;
-    if (viewer.mode === 'reference') {
-      const peaks = it.result.analysis.peaks;
-      const near = peaks.reduce((b, p) => (Math.abs(p.ppm - ppm) < Math.abs(b.ppm - ppm) ? p : b), peaks[0] || { ppm });
-      state.refPick = near.ppm;
-      setTab('info');
-      setTimeout(() => $('refValue') && $('refValue').focus(), 0);
-    } else {
-      const sig = it.result.analysis.multiplets.find((m) => ppm <= m.ppmFrom && ppm >= m.ppmTo);
-      if (sig) { state.hoverSig = sig; viewer.highlight = sig; viewer.draw(); if (state.tab === 'signals') renderTab(); }
-    }
-  },
+  onRange: (a, b) => toolRange(a, b),
+  onClickPpm: (ppm, pt) => toolClick(ppm, pt),
 });
 
 function cur() { return state.items[state.current]; }
@@ -81,8 +65,10 @@ function choose(i) {
   if (!it.result) {
     const t = performance.now();
     it.result = it.session.run();
+    syncOverlay(it);
     setStatus(`Processed in ${Math.round(performance.now() - t)} ms`);
   }
+  syncOverlay(it);
   viewer.setResult(it.result);
   syncControls(); renderLibrary(); renderReport(); renderTab(); updateBands();
 }
@@ -90,6 +76,7 @@ function choose(i) {
 function rerun(keepView = true) {
   const it = cur(); if (!it) return;
   it.result = it.session.run();
+  syncOverlay(it);
   viewer.setResult(it.result, keepView);
   syncControls(); renderReport(); renderTab(); updateBands();
 }
@@ -124,6 +111,7 @@ function syncControls() {
   $('reverse').classList.toggle('on', !!p.reverse); $('reverse').disabled = !p.fromFid;
   $('labels').classList.toggle('on', viewer.showLabels);
   $('curves').classList.toggle('on', viewer.showCurves);
+  syncUndo();
 }
 
 function renderReport() {
@@ -148,6 +136,7 @@ function renderTab() {
   if (state.tab === 'suggest') body.innerHTML = suggestHTML(it);
   if (state.tab === 'info') body.innerHTML = infoHTML(it);
   if (state.tab === 'polymer') body.innerHTML = polymerHTML(it);
+  if (state.tab !== 'polymer' && viewer.picks.length) { viewer.picks = []; viewer.draw(); }
   bindTab(it);
 }
 
@@ -166,7 +155,8 @@ function signalsHTML(it) {
     const c = m.candidates || [];
     const top = c[0] ? esc(c[0].group.name) : '<span class="alt">no match in table</span>';
     const alt = c.slice(1, 3).map((x) => esc(x.group.name)).join(' · ');
-    const flag = m.flag ? `<div><span class="flag ${m.flag.kind}">${esc(m.flag.label)}</span></div>` : '';
+    const lab = labelFor(it, m);
+    const flag = (lab ? `<div><span class="flag note">${esc(lab)}</span></div>` : '') + (m.flag ? `<div><span class="flag ${m.flag.kind}">${esc(m.flag.label)}</span></div>` : '');
     const shift = !is13 && m.multiplicity === 'm' ? `${m.ppmFrom.toFixed(2)}–${m.ppmTo.toFixed(2)}` : m.ppm.toFixed(is13 ? 1 : 2);
     return `<tr data-k="${k}" class="${m.reference ? 'ref ' : ''}${m.excluded || (m.flag && m.flag.kind === 'solvent') ? 'muted' : ''} ${state.hoverSig && Math.abs(state.hoverSig.ppm - m.ppm) < 1e-6 ? 'hl' : ''}">
       <td class="mono">${shift}</td>
@@ -276,18 +266,18 @@ function polymerHTML(it) {
   const summary = dp ? `DP(¹H NMR) = ${fmt(dp.dp, 1)}${dp.mn ? `, Mn(NMR) = ${Math.round(dp.mn).toLocaleString('en-US')} g/mol` : ''} (${poly ? poly.name : 'repeat unit'}, M₀ = ${fmt(P.m0)} g/mol; end group ${endPreset ? endPreset.name : ''}, ${P.endH}H)` : '';
   let out = `<div class="section"><h3>Repeat unit</h3><div class="poly">
     <div class="row"><label for="pPoly">Polymer</label><select id="pPoly">${NMR.POLYMERS.map((p) => `<option value="${p.id}" ${p.id === P.polymer ? 'selected' : ''}>${esc(p.name)} (${esc(p.unit)})</option>`).join('')}<option value="custom" ${P.polymer === 'custom' ? 'selected' : ''}>Custom repeat unit</option></select></div>
-    <div class="row"><label for="pRep">Counting signal</label><select id="pRep">${sigOptions(it, P.repeatSig, poly ? `<option value="window" ${P.repeatSig === 'window' ? 'selected' : ''}>Standard window: ${esc(poly.signal.label)}, δ ${poly.signal.from}–${poly.signal.to}</option>` : '')}</select></div>
+    <div class="row"><label for="pRep">Counting signal <button class="linkish" id="pickRep" type="button">pick on spectrum</button></label><select id="pRep">${sigOptions(it, P.repeatSig, poly ? `<option value="window" ${P.repeatSig === 'window' ? 'selected' : ''}>Standard window: ${esc(poly.signal.label)}, δ ${poly.signal.from}–${poly.signal.to}</option>` : '')}</select></div>
     <div class="row"><label>H per unit · M₀ (g/mol)</label><div class="pair"><input id="pRepH" type="number" min="0.1" step="any" value="${P.repeatH}" aria-label="Protons per repeat unit"><input id="pM0" type="number" min="0" step="any" value="${P.m0}" aria-label="Repeat unit mass"></div></div>
     ${repeatInt != null ? `<p class="assign alt">Integral of counting signal: <b class="mono">${fmt(repeatInt)}</b> on the current scale.</p>` : ''}
   </div></div>
   <div class="section"><h3>End group</h3><div class="poly">
     <div class="row"><label for="pEnd">Type</label><select id="pEnd">${NMR.END_GROUPS.map((g) => `<option value="${g.id}" ${g.id === P.end ? 'selected' : ''}>${esc(g.name)}${g.ppm ? ' · ' + esc(g.ppm) : ''}</option>`).join('')}</select></div>
-    <div class="row"><label for="pEndSig">Its signal</label><select id="pEndSig">${sigOptions(it, P.endSig, endPreset && endPreset.window ? `<option value="window" ${P.endSig === 'window' ? 'selected' : ''}>Standard window: δ ${endPreset.window[0]}–${endPreset.window[1]} (local baseline)</option>` : '')}</select></div>
+    <div class="row"><label for="pEndSig">Its signal <button class="linkish" id="pickEnd" type="button">pick on spectrum</button></label><select id="pEndSig">${sigOptions(it, P.endSig, endPreset && endPreset.window ? `<option value="window" ${P.endSig === 'window' ? 'selected' : ''}>Standard window: δ ${endPreset.window[0]}–${endPreset.window[1]} (local baseline)</option>` : '')}</select></div>
     ${end ? `<p class="assign alt">End-group integral: <b class="mono">${fmt(end.area / u, 3)}</b> on the current scale.</p>` : ''}
     ${endPreset && endPreset.note ? `<p class="assign alt">${esc(endPreset.note)}</p>` : ''}
     <div class="row"><label>H in signal · ends/chain</label><div class="pair"><input id="pEndH" type="number" min="0.1" step="any" value="${P.endH}" aria-label="Protons in end-group signal"><input id="pEndN" type="number" min="1" step="1" value="${P.endCount}" aria-label="End groups per chain"></div></div>
     <div class="row"><label for="pEndM">End-group mass, both ends (g/mol)</label><input id="pEndM" type="number" min="0" step="any" value="${P.endMass}"></div>
-    <p class="assign alt">End-group signals are usually small. If yours is not in the list, choose <b>Integrate</b> in the toolbar and drag across it.</p>
+    <p class="assign alt">End-group signals are usually small. If yours is not in the list, use <b>pick on spectrum</b> and drag across it.</p>
   </div></div>`;
   out += `<div class="section"><h3>Degree of polymerisation</h3>${dp ? `<div class="result">
       <span class="sub">DP<sub>n</sub> (number-average repeat units per chain)</span><span class="big">${fmt(dp.dp, 1)}</span>
@@ -336,6 +326,8 @@ function bindPolymer(it) {
     redraw();
   });
   on('pEndSig', 'change', (e) => { P.endSig = e.target.value; redraw(); });
+  on('pickRep', 'click', () => { setMode('pickRepeat'); toast('Click or drag across the repeat-unit signal'); });
+  on('pickEnd', 'click', () => { setMode('pickEnd'); toast('Click or drag across the end-group signal'); });
   on('pEndH', 'change', (e) => { P.endH = +e.target.value || 1; redraw(); });
   on('pEndN', 'change', (e) => { P.endCount = Math.max(1, Math.round(+e.target.value || 1)); redraw(); });
   on('pEndM', 'change', (e) => { P.endMass = +e.target.value || 0; redraw(); });
@@ -355,9 +347,16 @@ function bindPolymer(it) {
     const t = state.polySummary;
     try { navigator.clipboard.writeText(t).then(() => toast('Result copied'), () => toast(t)); } catch (e) { toast(t); }
   });
-  // Highlight the chosen signals on the spectrum.
-  const hl = [P.repeatSig !== 'window' && P.repeatSig, P.endSig].filter(Boolean).map((k) => sigArea(it, k)).filter(Boolean);
-  viewer.highlight = hl.length ? hl[hl.length - 1].m : null; viewer.draw();
+  // Outline the counting and end-group signals on the spectrum.
+  const poly = NMR.POLYMERS.find((p) => p.id === P.polymer);
+  const endPreset = NMR.END_GROUPS.find((g) => g.id === P.end);
+  const box = (key, win, text) => {
+    if (key === 'window') return win ? { from: Math.max(win[0], win[1]), to: Math.min(win[0], win[1]), text } : null;
+    const s = key && sigArea(it, key);
+    return s ? { from: s.m.ppmFrom, to: s.m.ppmTo, text } : null;
+  };
+  viewer.picks = [box(P.repeatSig, poly && [poly.signal.from, poly.signal.to], 'repeat unit'), box(P.endSig, endPreset && endPreset.window, 'end group')].filter(Boolean);
+  viewer.draw();
 }
 
 function suggestRef(it, ppm) {
@@ -463,6 +462,7 @@ function bindTab(it) {
     }
     for (const b of body.querySelectorAll('[data-ex]')) b.addEventListener('click', () => {
       const m = sigs[+b.dataset.ex];
+      checkpoint(it);
       const ex = it.session.params.excluded;
       const k = ex.findIndex((e) => Math.abs(e - m.ppm) < 0.005);
       k >= 0 ? ex.splice(k, 1) : ex.push(m.ppm);
@@ -473,11 +473,13 @@ function bindTab(it) {
     for (const inp of body.querySelectorAll('[data-nh]')) inp.addEventListener('change', () => {
       const v = parseFloat(inp.value);
       const m = sigs[+inp.dataset.nh];
+      checkpoint(it);
       it.session.params.integralRef = v > 0 ? { ppm: m.ppm, value: v } : null;
       rerun(); toast(v > 0 ? `Integral at ${m.ppm.toFixed(2)} ppm set to ${v}` : 'Normalisation reset');
     });
     for (const b of body.querySelectorAll('[data-rm]')) b.addEventListener('click', () => {
       const m = sigs[+b.dataset.rm];
+      checkpoint(it);
       const mr = it.session.params.manualRegions;
       const k = mr.findIndex(([a, c]) => Math.abs(Math.max(a, c) - m.ppmFrom) < 1e-6 && Math.abs(Math.min(a, c) - m.ppmTo) < 1e-6);
       if (k >= 0) mr.splice(k, 1);
@@ -486,9 +488,9 @@ function bindTab(it) {
     const tm = $('toggleMinor');
     if (tm) tm.addEventListener('click', () => { state.showMinor = !state.showMinor; renderTab(); });
     const cn = $('clearNorm');
-    if (cn) cn.addEventListener('click', () => { it.session.params.integralRef = null; rerun(); });
+    if (cn) cn.addEventListener('click', () => edit(it, () => { it.session.params.integralRef = null; }));
     const cm = $('clearManual');
-    if (cm) cm.addEventListener('click', () => { it.session.params.manualRegions = []; rerun(); });
+    if (cm) cm.addEventListener('click', () => edit(it, () => { it.session.params.manualRegions = []; }));
   }
   if (state.tab === 'suggest') {
     for (const b of body.querySelectorAll('[data-cmp]')) b.addEventListener('click', () => {
@@ -508,11 +510,12 @@ function bindTab(it) {
     if (ap) ap.addEventListener('click', () => {
       const v = parseFloat($('refValue').value);
       if (isNaN(v)) return;
+      checkpoint(it);
       it.session.params.referenceShift += v - state.refPick;
       state.refPick = null; setMode('zoom'); rerun(); toast('Reference set');
     });
     const cr = $('clearRef');
-    if (cr) cr.addEventListener('click', () => { it.session.params.referenceShift = 0; rerun(); });
+    if (cr) cr.addEventListener('click', () => edit(it, () => { it.session.params.referenceShift = 0; }));
     const tf = $('toggleFid');
     if (tf) tf.addEventListener('click', () => {
       const p = it.session.params;
@@ -522,11 +525,306 @@ function bindTab(it) {
   }
 }
 
+// ---------- Spectrum tools ----------
+const HINTS = {
+  zoom: 'Drag to zoom · shift-drag to pan · scroll for intensity · ctrl-scroll or pinch to zoom · double-click to fit',
+  pan: 'Drag left or right to move along the spectrum · scroll for intensity',
+  peakAdd: 'Click a peak to mark it (snaps to the top) · drag over a region to mark its tallest point',
+  peakDel: 'Click near a peak to remove it · drag over a region to remove every peak in it',
+  integrate: 'Drag across a signal to add an integral region',
+  setint: 'Click a signal and type how many protons it is; every other integral scales with it',
+  reference: 'Click the peak you want to reference (TMS or solvent residual)',
+  label: 'Click a signal to label it (e.g. "CH₂–S end group") · click a label to edit or delete it',
+  note: 'Click anywhere on the plot to add a note · click a note to edit or delete it',
+  pickRepeat: 'Polymer: click the repeat-unit signal, or drag across it to integrate it',
+  pickEnd: 'Polymer: click the end-group signal, or drag across it to integrate it',
+};
+
 function setMode(m) {
-  viewer.mode = m;
-  for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', b.dataset.mode === m);
-  $('modehint').textContent = m === 'integrate' ? 'Drag across a signal to add an integral region' : m === 'reference' ? 'Click the peak you want to reference (TMS or solvent residual)' : 'Drag to zoom · shift-drag to pan · scroll for intensity · ctrl-scroll or pinch to zoom · double-click to fit';
+  viewer.setMode(m);
+  closePop();
+  const btnMode = m === 'pickRepeat' || m === 'pickEnd' ? null : m;
+  for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', b.dataset.mode === btnMode);
+  $('modehint').textContent = HINTS[m] || HINTS.zoom;
 }
+
+const is13C = (it) => /13C/.test(it.ds.nucleus);
+const shiftOf = (it) => it.session.params.referenceShift;
+
+// Labels and notes are stored on the unreferenced scale; the viewer gets referenced positions.
+function syncOverlay(it) {
+  const sh = shiftOf(it);
+  viewer.annotations = (it.session.params.annotations || []).map((a) => ({ ...a, ppm: a.ppm + sh, src: a }));
+}
+
+// ----- Undo / redo: snapshots of everything the tools edit -----
+const EDIT_KEYS = ['manualRegions', 'integralRef', 'peakEdits', 'annotations', 'excluded', 'referenceShift'];
+function snapshot(it) {
+  const p = it.session.params, o = {};
+  for (const k of EDIT_KEYS) o[k] = p[k];
+  return JSON.stringify({ p: o, poly: it.poly || null });
+}
+function checkpoint(it) {
+  (it.undo = it.undo || []).push(snapshot(it));
+  if (it.undo.length > 100) it.undo.shift();
+  it.redo = [];
+  syncUndo();
+}
+function edit(it, fn) { checkpoint(it); fn(); rerun(); }
+function restore(it, snap) {
+  const o = JSON.parse(snap);
+  Object.assign(it.session.params, o.p);
+  it.poly = o.poly || undefined;
+  rerun();
+}
+function undo() {
+  const it = cur(); if (!it || !(it.undo || []).length) return;
+  (it.redo = it.redo || []).push(snapshot(it));
+  restore(it, it.undo.pop()); syncUndo(); toast('Undone');
+}
+function redo() {
+  const it = cur(); if (!it || !(it.redo || []).length) return;
+  it.undo.push(snapshot(it));
+  restore(it, it.redo.pop()); syncUndo(); toast('Redone');
+}
+function syncUndo() {
+  const it = cur();
+  $('undo').disabled = !it || !(it.undo || []).length;
+  $('redo').disabled = !it || !(it.redo || []).length;
+}
+
+// Signal under a click, or the nearest one close by.
+function sigAt(it, ppm) {
+  const sigs = it.result.analysis.multiplets.filter((m) => !m.excluded);
+  const inside = sigs.find((m) => ppm <= m.ppmFrom && ppm >= m.ppmTo);
+  if (inside) return inside;
+  const tol = is13C(it) ? 0.5 : 0.05;
+  const near = sigs.map((m) => ({ m, d: Math.min(Math.abs(m.ppmFrom - ppm), Math.abs(m.ppmTo - ppm)) })).sort((a, b) => a.d - b.d)[0];
+  return near && near.d < tol ? near.m : null;
+}
+function ppmPerPx() { const L = viewer._L || viewer.layout(); return (viewer.view.hi - viewer.view.lo) / (L.right - L.left); }
+
+function addPeak(it, ppm) {
+  const pe = it.session.params.peakEdits, raw = ppm - shiftOf(it), tol = is13C(it) ? 0.05 : 0.004;
+  const r = pe.remove.findIndex((x) => Math.abs(x - raw) < tol);
+  if (r >= 0) pe.remove.splice(r, 1);
+  else if (!it.result.analysis.peaks.some((p) => Math.abs(p.ppm - ppm) < tol)) pe.add.push(raw);
+}
+function removePeak(it, p) {
+  const pe = it.session.params.peakEdits, raw = p.ppm - shiftOf(it), tol = is13C(it) ? 0.05 : 0.004;
+  if (p.manual) { const k = pe.add.findIndex((x) => Math.abs(x - raw) < tol * 2); if (k >= 0) pe.add.splice(k, 1); }
+  else pe.remove.push(raw);
+}
+function tallestIn(spec, a, b) {
+  const n = spec.real.length, step = (spec.ppmEnd - spec.ppmStart) / (n - 1);
+  const i0 = Math.max(1, Math.round((Math.max(a, b) - spec.ppmStart) / step)), i1 = Math.min(n - 2, Math.round((Math.min(a, b) - spec.ppmStart) / step));
+  let best = i0;
+  for (let i = i0; i <= i1; i++) if (spec.real[i] > spec.real[best]) best = i;
+  return spec.ppmStart + best * step;
+}
+
+function toolRange(a, b) {
+  const it = cur(); if (!it) return;
+  const hi = Math.max(a, b), lo = Math.min(a, b);
+  const mode = viewer.mode;
+  if (mode === 'integrate') {
+    edit(it, () => it.session.params.manualRegions.push([hi, lo]));
+    toast(`Integrated ${hi.toFixed(2)} – ${lo.toFixed(2)} ppm`);
+  } else if (mode === 'peakAdd') {
+    const ppm = tallestIn(it.result.spectrum, hi, lo);
+    edit(it, () => addPeak(it, ppm));
+    toast(`Peak marked at ${ppm.toFixed(is13C(it) ? 2 : 3)} ppm`);
+  } else if (mode === 'peakDel') {
+    const gone = it.result.analysis.peaks.filter((p) => p.ppm <= hi && p.ppm >= lo);
+    if (!gone.length) return;
+    edit(it, () => gone.forEach((p) => removePeak(it, p)));
+    toast(`Removed ${gone.length} peak${gone.length > 1 ? 's' : ''}`);
+  } else if (mode === 'pickRepeat' || mode === 'pickEnd') {
+    if (!/1H/.test(it.ds.nucleus)) return;
+    checkpoint(it);
+    it.session.params.manualRegions.push([hi, lo]);
+    rerun();
+    const m = it.result.analysis.multiplets.find((x) => x.manual && Math.abs(x.ppmFrom - hi) < 1e-6 && Math.abs(x.ppmTo - lo) < 1e-6) || sigAt(it, (hi + lo) / 2);
+    finishPick(it, mode, m, true);
+  }
+}
+
+function toolClick(ppm, pt) {
+  const it = cur(); if (!it) return;
+  const mode = viewer.mode;
+  const hit = viewer.annotationAt(pt.x, pt.y);
+  if (hit && (mode === 'label' || mode === 'note' || mode === 'zoom' || mode === 'pan')) return editAnnotation(it, hit.a.src, pt);
+  if (mode === 'reference') {
+    const peaks = it.result.analysis.peaks;
+    const near = peaks.reduce((b, p) => (Math.abs(p.ppm - ppm) < Math.abs(b.ppm - ppm) ? p : b), peaks[0] || { ppm });
+    state.refPick = near.ppm;
+    setTab('info');
+    setTimeout(() => $('refValue') && $('refValue').focus(), 0);
+  } else if (mode === 'peakAdd') {
+    const snapped = NMR.snapToPeak(it.result.spectrum, ppm);
+    edit(it, () => addPeak(it, snapped));
+    toast(`Peak marked at ${snapped.toFixed(is13C(it) ? 2 : 3)} ppm`);
+  } else if (mode === 'peakDel') {
+    const tol = 8 * ppmPerPx();
+    const p = it.result.analysis.peaks.filter((q) => Math.abs(q.ppm - ppm) < tol).sort((x, y) => Math.abs(x.ppm - ppm) - Math.abs(y.ppm - ppm))[0];
+    if (!p) return toast('No peak there');
+    edit(it, () => removePeak(it, p));
+    toast(`Removed peak at ${p.ppm.toFixed(is13C(it) ? 2 : 3)} ppm`);
+  } else if (mode === 'setint') {
+    if (!/1H/.test(it.ds.nucleus)) return toast('Integrals are for ¹H spectra');
+    const m = sigAt(it, ppm);
+    if (!m) return toast('No signal there. Use Integrate to add one first.');
+    state.hoverSig = m; viewer.highlight = m; viewer.draw();
+    popover(pt, { label: `∫ δ ${m.ppm.toFixed(2)} =`, type: 'number', value: (m.nH || 0).toFixed(2), ok: (v) => {
+      const x = parseFloat(v);
+      if (!(x > 0)) return;
+      edit(it, () => { it.session.params.integralRef = { ppm: m.ppm, value: x }; });
+      toast(`Integral at ${m.ppm.toFixed(2)} ppm set to ${x}; the rest scale with it`);
+    } });
+  } else if (mode === 'label') {
+    const m = sigAt(it, ppm);
+    const at = m ? m.ppm : NMR.snapToPeak(it.result.spectrum, ppm);
+    popover(pt, { label: `Label δ ${at.toFixed(2)}`, value: '', placeholder: 'e.g. CH₂–S end group', ok: (v) => {
+      if (!v.trim()) return;
+      edit(it, () => it.session.params.annotations.push({ ppm: at - shiftOf(it), text: v.trim(), kind: 'label' }));
+    } });
+  } else if (mode === 'note') {
+    popover(pt, { label: 'Note', value: '', placeholder: 'Text on the spectrum', ok: (v) => {
+      if (!v.trim()) return;
+      edit(it, () => it.session.params.annotations.push({ ppm: ppm - shiftOf(it), text: v.trim(), kind: 'note', yFrac: Math.min(0.95, Math.max(0, pt.yFrac)) }));
+    } });
+  } else if (mode === 'pickRepeat' || mode === 'pickEnd') {
+    const m = sigAt(it, ppm);
+    if (!m) return toast('No signal there. Drag across it to integrate it.');
+    finishPick(it, mode, m);
+  } else {
+    const sig = it.result.analysis.multiplets.find((m) => ppm <= m.ppmFrom && ppm >= m.ppmTo);
+    if (sig) { state.hoverSig = sig; viewer.highlight = sig; viewer.draw(); if (state.tab === 'signals') renderTab(); }
+  }
+}
+
+function editAnnotation(it, src, pt) {
+  const list = it.session.params.annotations;
+  popover(pt, { label: src.kind === 'label' ? 'Label' : 'Note', value: src.text,
+    ok: (v) => { if (v.trim() && v.trim() !== src.text) edit(it, () => { list[list.indexOf(src)].text = v.trim(); }); },
+    del: () => edit(it, () => list.splice(list.indexOf(src), 1)) });
+}
+
+function finishPick(it, mode, m, saved) {
+  if (!m) return toast('No signal found there');
+  const P = polyState(it);
+  if (!saved) checkpoint(it);
+  if (mode === 'pickRepeat') P.repeatSig = sigKey(m); else P.endSig = sigKey(m);
+  setMode('zoom');
+  setTab('polymer');
+  toast(`${mode === 'pickRepeat' ? 'Counting signal' : 'End-group signal'}: δ ${m.ppmFrom.toFixed(2)}–${m.ppmTo.toFixed(2)}`);
+}
+
+// ----- Inline popover for typed values (the viewer cannot use prompt()) -----
+function popover(pt, o) {
+  const el = $('pop');
+  el.innerHTML = `<span>${esc(o.label)}</span><input id="popIn" type="${o.type || 'text'}" ${o.type === 'number' ? 'step="any" min="0"' : ''} value="${esc(o.value)}" placeholder="${esc(o.placeholder || '')}" aria-label="${esc(o.label)}">
+    <button class="btn small primary" id="popOk" type="button">OK</button>${o.del ? '<button class="btn small" id="popDel" type="button">Delete</button>' : ''}<button class="x" id="popX" type="button" aria-label="Cancel">×</button>`;
+  el.hidden = false;
+  const wrap = $('plotwrap').getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(pt.x - 20, wrap.width - w - 8)) + 'px';
+  el.style.top = (pt.y + h + 14 < wrap.height ? pt.y + 12 : Math.max(8, pt.y - h - 12)) + 'px';
+  const inp = $('popIn');
+  const ok = () => { const v = inp.value; closePop(); o.ok(v); };
+  $('popOk').addEventListener('click', ok);
+  $('popX').addEventListener('click', closePop);
+  if (o.del) $('popDel').addEventListener('click', () => { closePop(); o.del(); });
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); if (e.key === 'Escape') closePop(); e.stopPropagation(); });
+  setTimeout(() => { inp.focus(); inp.select(); }, 0);
+}
+function closePop() { const el = $('pop'); if (el) { el.hidden = true; el.innerHTML = ''; } }
+
+// ----- Export -----
+function labelFor(it, m) {
+  const sh = shiftOf(it);
+  return (it.session.params.annotations || []).filter((a) => a.kind === 'label' && a.ppm + sh <= m.ppmFrom + 1e-6 && a.ppm + sh >= m.ppmTo - 1e-6).map((a) => a.text).join('; ');
+}
+const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+const csv = (rows) => rows.map((r) => r.map(csvCell).join(',')).join('\n');
+const fileBase = (it) => (it.ds.title || it.ds.name || 'spectrum').replace(/[^\w.-]+/g, '_').slice(0, 60);
+
+function exportAs(kind) {
+  const it = cur(); if (!it) return toast('Open a spectrum first');
+  $('exportMenu').hidden = true;
+  const freq = it.ds.frequency || 0;
+  if (kind === 'png') {
+    viewer.hoverX = undefined; viewer.draw();
+    const url = $('plot').toDataURL('image/png');
+    return showDialog('Plot image', { img: url, name: fileBase(it) + '.png' });
+  }
+  if (kind === 'peaks') {
+    const peaks = it.result.analysis.peaks;
+    const maxH = Math.max(...peaks.map((p) => p.height), 1);
+    const rows = [['ppm', 'Hz', 'height', 'relative %', 'picked']].concat(peaks.map((p) => [p.ppm.toFixed(4), freq ? (p.ppm * freq).toFixed(2) : '', p.height.toPrecision(6), (100 * p.height / maxH).toFixed(2), p.manual ? 'manual' : 'auto']));
+    return showDialog(`Peak list · ${peaks.length} peaks`, { text: csv(rows), name: fileBase(it) + '-peaks.csv', type: 'text/csv' });
+  }
+  if (kind === 'ints') {
+    const sigs = it.result.analysis.multiplets.filter((m) => !m.excluded && (!m.minor || m.manual || m.reference || is13C(it)));
+    const rows = [['from ppm', 'to ppm', 'centre ppm', 'multiplicity', 'J (Hz)', 'integral', 'label', 'environment']].concat(sigs.map((m) => [m.ppmFrom.toFixed(3), m.ppmTo.toFixed(3), m.ppm.toFixed(3), m.multiplicity || '', (m.J || []).map((j) => j.toFixed(1)).join(' '), is13C(it) ? '' : (m.nH || 0).toFixed(3), labelFor(it, m), m.candidates && m.candidates[0] ? m.candidates[0].group.name : '']));
+    const notes = (it.session.params.annotations || []).filter((a) => a.kind === 'note');
+    let text = csv(rows);
+    if (notes.length) text += '\n\n' + csv([['note at ppm', 'text']].concat(notes.map((a) => [(a.ppm + shiftOf(it)).toFixed(3), a.text])));
+    return showDialog(`Integrals · ${sigs.length} signals`, { text, name: fileBase(it) + '-integrals.csv', type: 'text/csv' });
+  }
+  showDialog('Report', { text: it.result.report, name: fileBase(it) + '-report.txt', type: 'text/plain' });
+}
+
+function showDialog(title, o) {
+  $('dlgTitle').textContent = title;
+  $('dlgBody').innerHTML = o.img ? `<img id="dlgImg" src="${o.img}" alt="Spectrum plot">` : `<textarea id="dlgText" spellcheck="false" aria-label="${esc(title)}"></textarea>`;
+  if (!o.img) $('dlgText').value = o.text;
+  $('dlg').hidden = false;
+  const done = (m) => toast(m);
+  $('dlgCopy').onclick = async () => {
+    try {
+      if (o.img) {
+        const blob = await (await fetch(o.img)).blob();
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      } else await navigator.clipboard.writeText(o.text);
+      done('Copied');
+    } catch (e) {
+      if (o.img) done('Right-click the image to copy or save it');
+      else { $('dlgText').select(); done('Press ⌘C / Ctrl+C to copy'); }
+    }
+  };
+  $('dlgSave').onclick = () => {
+    const blob = o.img ? null : new Blob([o.text], { type: o.type });
+    const a = document.createElement('a');
+    a.href = o.img || URL.createObjectURL(blob); a.download = o.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    done(o.img ? 'If nothing downloads, right-click the image and save it' : 'If nothing downloads, use Copy');
+  };
+}
+$('dlgClose').addEventListener('click', () => { $('dlg').hidden = true; });
+$('dlg').addEventListener('click', (e) => { if (e.target === $('dlg')) $('dlg').hidden = true; });
+$('exportBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const m = $('exportMenu');
+  m.hidden = !m.hidden;
+  m.style.right = '8px'; m.style.top = '8px';
+});
+$('exportMenu').addEventListener('click', (e) => { const b = e.target.closest('[data-ex]'); if (b) exportAs(b.dataset.ex); });
+document.addEventListener('click', (e) => { if (!e.target.closest('#exportMenu,#exportBtn')) $('exportMenu').hidden = true; });
+$('undo').addEventListener('click', undo);
+$('redo').addEventListener('click', redo);
+
+const KEYS = { z: 'zoom', h: 'pan', k: 'peakAdd', x: 'peakDel', i: 'integrate', n: 'setint', r: 'reference', l: 'label', t: 'note' };
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest && e.target.closest('input,textarea,select,[contenteditable]')) return;
+  const k = e.key.toLowerCase();
+  if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if ((e.metaKey || e.ctrlKey) && k === 'y') { e.preventDefault(); redo(); return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (k === 'escape') { closePop(); $('exportMenu').hidden = true; $('dlg').hidden = true; setMode('zoom'); return; }
+  if (k === 'f') { viewer.reset(); return; }
+  if (KEYS[k]) setMode(KEYS[k]);
+});
 
 // ---------- Controls ----------
 for (const b of document.querySelectorAll('[data-mode]')) b.addEventListener('click', () => setMode(b.dataset.mode));

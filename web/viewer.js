@@ -19,6 +19,9 @@ export class SpectrumViewer {
     this.view = null;
     this.drag = null;
     this.hoverPpm = null;
+    this.annotations = [];
+    this.picks = [];
+    this._boxes = [];
     this._bind();
     new ResizeObserver(() => this.draw()).observe(canvas.parentElement);
   }
@@ -48,6 +51,17 @@ export class SpectrumViewer {
     return { hi: Math.min(hi, s.ppmStart), lo: Math.max(lo, s.ppmEnd) };
   }
 
+  setMode(m) {
+    this.mode = m;
+    const cursors = { pan: 'grab', label: 'text', note: 'text', peakDel: 'pointer', setint: 'pointer', reference: 'pointer' };
+    this.canvas.style.cursor = cursors[m] || 'crosshair';
+  }
+
+  // Annotation under a canvas point (labels and notes are hit-tested by their drawn box).
+  annotationAt(x, y) {
+    return this._boxes.find((b) => x >= b.x - 4 && x <= b.x + b.w + 4 && y >= b.y - 4 && y <= b.y + b.h + 4) || null;
+  }
+
   reset() { if (this.result) { this.view = this.defaultView(this.result); this.yScale = 1; this.draw(); } }
   zoomTo(hi, lo) { this.view = { hi, lo }; this.draw(); }
   zoomBy(f) {
@@ -65,6 +79,7 @@ export class SpectrumViewer {
       trace: g('--trace'), axis: g('--muted'), grid: g('--grid'), text: g('--fg'), muted: g('--muted'),
       integral: g('--integral'), band: g('--band'), bandText: g('--band-ink'), hl: g('--hl'),
       stick: g('--stick'), bg: g('--plot'), solvent: g('--solvent'), select: g('--select'),
+      accent: g('--accent'), note: g('--note'), surface: g('--surface'),
     };
   }
 
@@ -240,11 +255,11 @@ export class SpectrumViewer {
       let peaks = this.result.analysis.peaks.filter((p) => p.ppm <= this.view.hi && p.ppm >= this.view.lo).sort((a, b) => b.ppm - a.ppm);
       if (peaks.length > 40) {
         const major = (this.result.analysis.multiplets || []).filter((m) => !m.minor);
-        peaks = peaks.filter((p) => major.some((m) => p.ppm <= m.ppmFrom && p.ppm >= m.ppmTo));
+        peaks = peaks.filter((p) => p.manual || major.some((m) => p.ppm <= m.ppmFrom && p.ppm >= m.ppmTo));
       }
       const maxLabels = Math.floor((L.right - L.left) / 11);
       let shown = peaks;
-      if (shown.length > maxLabels) shown = peaks.slice().sort((a, b) => b.height - a.height).slice(0, maxLabels).sort((a, b) => b.ppm - a.ppm);
+      if (shown.length > maxLabels) shown = peaks.slice().sort((a, b) => (b.manual - a.manual) || (b.height - a.height)).slice(0, maxLabels).sort((a, b) => b.ppm - a.ppm);
       const xs = shown.map((p) => this.xOf(p.ppm, L));
       const pos = spread(xs, 11, L.left + 6, L.right - 6);
       const dec = /13C/.test(s.nucleus) ? 2 : 3;
@@ -262,10 +277,58 @@ export class SpectrumViewer {
         ctx.save();
         ctx.translate(pos[k] + 3.5, labelBase - 2);
         ctx.rotate(-Math.PI / 2);
-        ctx.fillStyle = C.text;
+        ctx.fillStyle = p.manual ? C.accent : C.text;
         ctx.fillText(p.ppm.toFixed(dec), 0, 0);
         ctx.restore();
       }
+    }
+    // Hand-picked peaks get a marker at the apex.
+    ctx.fillStyle = C.accent;
+    for (const p of this.result.analysis.peaks) {
+      if (!p.manual || p.ppm > this.view.hi || p.ppm < this.view.lo) continue;
+      const X = this.xOf(p.ppm, L), Y = Math.max(L.top + 6, yOf(p.height) - 4);
+      ctx.beginPath(); ctx.moveTo(X, Y); ctx.lineTo(X - 4, Y - 7); ctx.lineTo(X + 4, Y - 7); ctx.closePath(); ctx.fill();
+    }
+
+    // Signals chosen for a calculation (polymer counting signal and end group).
+    ctx.font = '600 10px ' + getComputedStyle(document.documentElement).getPropertyValue('--font-ui');
+    ctx.textAlign = 'center';
+    this.picks.forEach((pk, k) => {
+      const x1 = this.xOf(pk.from, L), x2 = this.xOf(pk.to, L);
+      if (x2 < L.left || x1 > L.right) return;
+      ctx.strokeStyle = C.note; ctx.lineWidth = 1.5; ctx.setLineDash([3, 3]);
+      ctx.strokeRect(x1, L.top, x2 - x1, L.axisY - L.top);
+      ctx.setLineDash([]);
+      ctx.fillStyle = C.note;
+      ctx.fillText(pk.text, (x1 + x2) / 2, L.top + 12 + k * 13);
+    });
+
+    // Labels on signals sit over the signal's apex; notes sit where they were placed.
+    this._boxes = [];
+    ctx.font = '600 11px ' + getComputedStyle(document.documentElement).getPropertyValue('--font-ui');
+    ctx.textAlign = 'left';
+    for (const a of this.annotations) {
+      if (a.ppm > this.view.hi || a.ppm < this.view.lo) continue;
+      const X = this.xOf(a.ppm, L);
+      const w = ctx.measureText(a.text).width + 10, h = 17;
+      let bx, by;
+      if (a.kind === 'label') {
+        const k = Math.round(idx(a.ppm)), span = Math.max(2, Math.round(0.03 / Math.abs(step)));
+        let apex = 0;
+        for (let i = Math.max(0, k - span); i <= Math.min(n - 1, k + span); i++) apex = Math.max(apex, y[i]);
+        const top = Math.max(L.top + h + 6, yOf(apex) - 10);
+        bx = X - w / 2; by = top - h;
+        ctx.strokeStyle = C.note; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(X, by + h); ctx.lineTo(X, top + 6); ctx.stroke();
+      } else {
+        bx = X; by = L.top + (a.yFrac ?? 0.2) * (L.axisY - L.top);
+      }
+      bx = Math.min(L.right - w, Math.max(L.left, bx));
+      ctx.fillStyle = C.surface; ctx.strokeStyle = C.note; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(bx, by, w, h, 4) : ctx.rect(bx, by, w, h); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = C.note;
+      ctx.fillText(a.text, bx + 5, by + 12.5);
+      this._boxes.push({ x: bx, y: by, w, h, a });
     }
 
     // Drag selection
@@ -289,7 +352,8 @@ export class SpectrumViewer {
       if (!this.result) return;
       c.setPointerCapture(e.pointerId);
       const p = pt(e);
-      this.drag = { x1: p.x, pan: e.button === 1 || e.shiftKey, view: { ...this.view } };
+      this.drag = { x1: p.x, y1: p.y, pan: e.button === 1 || e.shiftKey || this.mode === 'pan', view: { ...this.view } };
+      if (this.drag.pan) c.style.cursor = 'grabbing';
     });
     c.addEventListener('pointermove', (e) => {
       if (!this.result) return;
@@ -313,19 +377,20 @@ export class SpectrumViewer {
       if (!this.drag) return;
       const d = this.drag; this.drag = null;
       const L = this._L || this.layout();
+      if (d.pan) this.setMode(this.mode);
       if (!d.pan && d.x2 !== undefined && Math.abs(d.x2 - d.x1) > 4) {
         const a = this.ppmOf(Math.min(d.x1, d.x2), L), b = this.ppmOf(Math.max(d.x1, d.x2), L);
-        if (this.mode === 'integrate') this.onRange(a, b);
+        if (RANGE_MODES.has(this.mode)) this.onRange(a, b);
         else this.zoomTo(a, b);
       } else if (!d.pan && e.type === 'pointerup') {
-        this.onClickPpm(this.ppmOf(d.x1, L));
+        this.onClickPpm(this.ppmOf(d.x1, L), { x: d.x1, y: d.y1, yFrac: (d.y1 - L.top) / (L.axisY - L.top) });
       }
       this.draw();
     };
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', end);
     c.addEventListener('pointerleave', () => { this.hoverX = undefined; this.onHover(null); this.draw(); });
-    c.addEventListener('dblclick', () => this.reset());
+    c.addEventListener('dblclick', () => { if (!['label', 'note'].includes(this.mode)) this.reset(); });
     c.addEventListener('wheel', (e) => {
       if (!this.result) return;
       e.preventDefault();
@@ -343,6 +408,9 @@ export class SpectrumViewer {
     }, { passive: false });
   }
 }
+
+// Tools where dragging selects a region instead of zooming.
+const RANGE_MODES = new Set(['integrate', 'peakAdd', 'peakDel', 'pickRepeat', 'pickEnd']);
 
 function niceTicks(lo, hi, count) {
   const span = hi - lo;

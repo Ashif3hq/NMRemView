@@ -15,7 +15,14 @@ functional group.
 Integrals work like in MestReNova: drag to add a region, type a value to normalise every
 integral to it, delete single regions. The Polymer panel turns integrals into polymer data:
 DPₙ and Mₙ by end-group analysis (repeat-unit and end-group presets), copolymer mole and weight
-fractions, and polyisoprene / polybutadiene microstructure (1,4 / 3,4 / 1,2, cis : trans).
+fractions, and polyisoprene / polymyrcene / polybutadiene microstructure (1,4 / 3,4 / 1,2, cis : trans).
+
+The web trial has a MestReNova-style toolbar (keyboard shortcut in brackets): Zoom (Z), Pan (H),
+Peak + (K) and Peak − (X) for manual peak picking, Integrate (I), ∫ = n (N) to set a reference
+integral, δ ref (R) to reference the shift, Label (L) to name a signal, Note (T) for free text on
+the plot, undo/redo (Ctrl/⌘ Z), and Export to PNG, peak-list CSV and integral CSV. In the Polymer
+panel, "pick on spectrum" chooses the counting and end-group signals by clicking or dragging on
+the plot.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 

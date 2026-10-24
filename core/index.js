@@ -5,7 +5,7 @@ export { readBruker } from './bruker.js';
 export { readVarian } from './varian.js';
 export { readText } from './textformats.js';
 export { unzip } from './zip.js';
-export { createSession } from './session.js';
+export { createSession, snapToPeak } from './session.js';
 export { processDataset, transformFid, defaultProcessing, applyPhase, autoPhase, baselineCorrect, estimateNoise, ppmAxis } from './processing.js';
 export { analyse, pickPeaks, findMultiplets, integrateRange, describeMultiplet, normaliseIntegrals } from './analysis.js';
 export { suggest, candidateGroups, journalReport, formulaInfo, matchCompounds, fragmentHints } from './assign.js';

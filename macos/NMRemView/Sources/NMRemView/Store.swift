@@ -23,7 +23,7 @@ final class Store: ObservableObject {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.message = "Choose Bruker experiment folders, Varian .fid folders, JCAMP-DX, CSV or .zip files"
+        panel.message = "Choose NMR data: Bruker or Varian folders, .zip, JEOL .jdf, MestReNova .mnova, JCAMP-DX, nmrML, NMRPipe or CSV"
         if panel.runModal() == .OK { open(urls: panel.urls) }
     }
 

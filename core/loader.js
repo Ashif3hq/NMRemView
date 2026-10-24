@@ -88,7 +88,7 @@ export function loadExpanded(all) {
       }
     } catch (e) { warnings.push(`${base}: ${e.message}`); }
   }
-  if (!datasets.length && !warnings.length) warnings.push('No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova, when it embeds open data), CSV/TXT.');
+  if (!datasets.length && !warnings.length) warnings.push('No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova), CSV/TXT.');
   return { datasets, warnings };
 }
 

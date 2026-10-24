@@ -18,7 +18,7 @@ export function createSession(ds) {
     totalH: null,
     manualRegions: [],
     // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
-    autoReference: !!ds.fid && ['jeol', 'nmrpipe', 'magritek', 'nmrml'].includes(ds.fid.origin),
+    autoReference: !!ds.fid && ['jeol', 'nmrpipe', 'magritek', 'nmrml', 'mnova'].includes(ds.fid.origin),
     excluded: [],
   };
   let fftCache = null;
@@ -39,7 +39,7 @@ export function createSession(ds) {
   function run() {
     const c = complexSpectrum();
     if (params.autoPhase && c.imag) {
-      const a = autoPhase(c.real, c.imag);
+      const a = autoPhase(c.real, c.imag, { wholeSpectrum: /1H/.test(ds.nucleus) });
       params.ph0 = Math.round(a.ph0 * 10) / 10;
       params.ph1 = Math.round(a.ph1 * 10) / 10;
       params.autoPhase = false;

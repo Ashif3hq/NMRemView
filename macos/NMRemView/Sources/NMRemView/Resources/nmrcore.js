@@ -376,7 +376,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     return out;
   }
   var dec = (b) => new TextDecoder("latin1").decode(b);
-  function readBruker(files, name = "bruker") {
+  function readBruker(files, name = "bruker", opts = {}) {
     const get = (p) => files.get(p);
     const acqusBuf = get("acqus");
     if (!acqusBuf) throw new Error("Bruker folder has no acqus file");
@@ -396,10 +396,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const base = { name, title: title || name, nucleus, solvent, frequency: num(acqus.$SFO1), meta, source: "Bruker" };
     let fid = null;
     const fidBuf = get("fid");
-    if (fidBuf) {
+    if (fidBuf || opts.fidValues) {
       const td = num(acqus.$TD);
       const big = num(acqus.$BYTORDA) === 1;
-      const raw = readInts(fidBuf, big, num(acqus.$DTYPA) === 2);
+      const raw = opts.fidValues || readInts(fidBuf, big, num(acqus.$DTYPA) === 2);
       const n = Math.min(Math.floor((td || raw.length) / 2), Math.floor(raw.length / 2));
       const scale = Math.pow(2, num(acqus.$NC) || 0);
       const re = new Float64Array(n), im = new Float64Array(n);
@@ -952,34 +952,143 @@ if (typeof globalThis.TextDecoder === 'undefined') {
 
   // core/mnova.js
   var dec2 = (b) => new TextDecoder("latin1").decode(b);
+  var u32 = (b, p) => (b[p] << 24 | b[p + 1] << 16 | b[p + 2] << 8 | b[p + 3]) >>> 0;
+  function lastUtf16(b, from, to, minLen = 3) {
+    let best = null, run = "", start = -1;
+    for (let p = Math.max(0, from); p + 1 < to; p += 2) {
+      const ok = b[p] === 0 && b[p + 1] >= 32 && b[p + 1] < 127;
+      if (ok) {
+        if (!run) start = p;
+        run += String.fromCharCode(b[p + 1]);
+      }
+      if (!ok || p + 3 >= to) {
+        if (run.length >= minLen) best = { text: run, at: start };
+        run = "";
+      }
+    }
+    return best;
+  }
+  function findBlocks(b) {
+    const blocks = [];
+    for (let p = 8; p < b.length - 2; p++) {
+      if (b[p] !== 120 || b[p + 1] !== 156 && b[p + 1] !== 218 && b[p + 1] !== 1 && b[p + 1] !== 94) continue;
+      const clen = u32(b, p - 8) - 4, rawLen = u32(b, p - 4);
+      if (clen <= 2 || clen > b.length - p || rawLen > 64e6) continue;
+      try {
+        const data = inflateZlib(b.subarray(p, p + clen));
+        if (data.length !== rawLen) continue;
+        const evenFrom = p - 8 - 200 - (p - 8) % 2;
+        const n1 = lastUtf16(b, evenFrom, p - 8), n2 = lastUtf16(b, evenFrom + 1, p - 8);
+        const nm = [n1, n2].filter(Boolean).sort((x, y) => y.at - x.at)[0];
+        blocks.push({ at: p, end: p + clen, name: nm ? nm.text : "", data });
+        p += clen - 1;
+      } catch (e) {
+      }
+    }
+    return blocks;
+  }
+  function findFid(b, from, to, td) {
+    for (const size of [4, 8]) {
+      const want = td * size;
+      for (let p = from; p + 5 + want <= Math.min(b.length, to + 5 + want); p++) {
+        if (u32(b, p) !== want || b[p + 4] > 1) continue;
+        const dv = new DataView(b.buffer, b.byteOffset + p + 5, want);
+        const vals = new Float64Array(td);
+        let finite = true, energy = 0;
+        for (let i = 0; i < td; i++) {
+          const v = size === 4 ? dv.getFloat32(i * 4, true) : dv.getFloat64(i * 8, true);
+          if (!Number.isFinite(v) || Math.abs(v) > 1e30) {
+            finite = false;
+            break;
+          }
+          vals[i] = v;
+          energy += v * v;
+        }
+        if (finite && energy > 0) return { at: p, vals };
+      }
+    }
+    return null;
+  }
+  function readMnovaBruker(b, name) {
+    const blocks = findBlocks(b);
+    const out = [], seen = /* @__PURE__ */ new Set();
+    let group = /* @__PURE__ */ new Map();
+    for (let k = 0; k < blocks.length; k++) {
+      const blk = blocks[k];
+      const file = blk.name.split("/").pop();
+      if (file === "procs") group.set("pdata/1/procs", blk.data);
+      else if (file === "title") group.set("pdata/1/title", blk.data);
+      else if (file === "acqus") {
+        group.set("acqus", blk.data);
+        const files = group;
+        group = /* @__PURE__ */ new Map();
+        const acqus = parseBrukerParams(dec2(blk.data));
+        const td = parseInt(acqus.$TD, 10);
+        if (!(td > 0)) continue;
+        const next = blocks.slice(k + 1).find((x) => x.name.split("/").pop() === "acqus");
+        const limit = next ? next.at : b.length;
+        const fid = findFid(b, blk.end, limit, td);
+        if (!fid || seen.has(fid.at)) continue;
+        seen.add(fid.at);
+        const label = expName(b, blk.end, fid.at) || name;
+        try {
+          const ds = readBruker(files, label, { fidValues: fid.vals });
+          if (!files.get("pdata/1/title") || !dec2(files.get("pdata/1/title")).trim()) ds.title = label;
+          ds.source = "MestReNova (Bruker data)";
+          if (ds.fid) ds.fid.origin = "mnova";
+          out.push(ds);
+        } catch (e) {
+        }
+      }
+    }
+    return out;
+  }
+  function expName(b, from, to) {
+    let best = null;
+    for (const off of [0, 1]) {
+      let p = from + ((from + off) % 2 ? 1 : 0);
+      let run = "";
+      for (; p + 1 < to; p += 2) {
+        if (b[p] === 0 && b[p + 1] >= 32 && b[p + 1] < 127) {
+          run += String.fromCharCode(b[p + 1]);
+          continue;
+        }
+        const m = run.match(/([^/\\]+)[/\\](\d+)[/\\](?:fid|ser|acqus?)$/);
+        if (m) best = `${m[1]} (${m[2]})`;
+        run = "";
+      }
+    }
+    return best;
+  }
   function readMnova(bytes, name = "document.mnova") {
     const found = [];
+    try {
+      found.push(...readMnovaBruker(bytes, name));
+    } catch (e) {
+    }
+    if (found.length) return found;
     const tryText = (u8) => {
       const s = dec2(u8);
       let i = s.indexOf("##TITLE=");
       while (i >= 0 && found.length < 20) {
         const end = s.indexOf("##END=", i);
         if (end < 0) break;
-        try {
-          for (const ds of readJcamp(s.slice(i, end + 8), name)) found.push({ ...ds, source: "MestReNova (embedded JCAMP-DX)" });
-        } catch (e) {
+        const block = s.slice(i, end + 8);
+        if (/##DATA ?TABLE|##XYDATA|##PEAK ?TABLE|##XYPOINTS/i.test(block)) {
+          try {
+            for (const ds of readJcamp(block, name)) found.push({ ...ds, source: "MestReNova (embedded JCAMP-DX)" });
+          } catch (e) {
+          }
         }
         i = s.indexOf("##TITLE=", end);
       }
     };
     tryText(bytes);
-    let tried = 0;
-    for (let p = 0; p < bytes.length - 2 && tried < 400 && !found.length; p++) {
-      if (bytes[p] !== 120 || bytes[p + 1] !== 156 && bytes[p + 1] !== 218 && bytes[p + 1] !== 1) continue;
-      tried++;
-      try {
-        const inner = inflateZlib(bytes.subarray(p));
-        if (inner.length > 64) tryText(inner);
-      } catch (e) {
-      }
+    if (!found.length) {
+      for (const blk of findBlocks(bytes)) if (blk.data.length > 64) tryText(blk.data);
     }
     if (!found.length) {
-      throw new Error("This .mnova document stores its spectra in MestReNova's closed format. In MestReNova choose File \u203A Save As\u2026 \u203A JCAMP-DX (*.jdx) and open that, or open the original instrument folder.");
+      throw new Error("Could not find spectrum data inside this .mnova document. In MestReNova choose File \u203A Save As\u2026 \u203A JCAMP-DX (*.jdx) and open that, or open the original instrument folder.");
     }
     return found;
   }
@@ -1049,7 +1158,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         warnings.push(`${base}: ${e.message}`);
       }
     }
-    if (!datasets.length && !warnings.length) warnings.push("No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova, when it embeds open data), CSV/TXT.");
+    if (!datasets.length && !warnings.length) warnings.push("No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova), CSV/TXT.");
     return { datasets, warnings };
   }
   function subset(all, dir) {
@@ -1201,7 +1310,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     }
     return { re: R, im: I };
   }
-  function autoPhase(re, im) {
+  function autoPhase(re, im, opts = {}) {
     const n = re.length;
     const mag = new Float64Array(n);
     let max = 0;
@@ -1214,10 +1323,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const thr = Math.max(floor, max * 2e-3);
     let idx = [];
     for (let i = 0; i < n; i++) if (mag[i] > thr) idx.push(i);
-    if (idx.length > 6e3) {
-      const stride = idx.length / 6e3;
+    if (idx.length > 4e3) {
+      const stride = idx.length / 4e3;
       const keep = [];
-      for (let k = 0; k < 6e3; k++) keep.push(idx[Math.floor(k * stride)]);
+      for (let k = 0; k < 4e3; k++) keep.push(idx[Math.floor(k * stride)]);
       idx = keep;
     }
     if (!idx.length) return { ph0: 0, ph1: 0 };
@@ -1237,13 +1346,58 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       return neg / (tot || 1) - (sum > 0 ? 1e-3 : 0);
     };
     let best = { c: Infinity, p0: 0, p1: 0 };
+    const L = idx.length, rp = new Float64Array(L), ip = new Float64Array(L);
     for (let p1 = -180; p1 <= 180; p1 += 15) {
+      for (let k = 0; k < L; k++) {
+        const p = p1 * fr[k] * d, c = Math.cos(p), s = Math.sin(p);
+        rp[k] = rr[k] * c - ii[k] * s;
+        ip[k] = rr[k] * s + ii[k] * c;
+      }
       for (let p0 = -180; p0 < 180; p0 += 10) {
-        const c = cost(p0, p1);
+        const c0 = Math.cos(p0 * d), s0 = Math.sin(p0 * d);
+        let neg = 0, tot = 0, sum = 0;
+        for (let k = 0; k < L; k++) {
+          const r = rp[k] * c0 - ip[k] * s0;
+          if (r < 0) neg += r * r;
+          tot += r * r;
+          sum += r;
+        }
+        const c = neg / (tot || 1) - (sum > 0 ? 1e-3 : 0);
         if (c < best.c) best = { c, p0, p1 };
       }
     }
-    const res = nelderMead((v) => cost(v[0], v[1]), [best.p0, best.p1], [5, 8], 150);
+    let res = nelderMead((v) => cost(v[0], v[1]), [best.p0, best.p1], [5, 8], 150);
+    const step = Math.max(1, Math.floor(n / 8192));
+    const m = Math.floor(n / step);
+    const r22 = new Float64Array(m), i2 = new Float64Array(m);
+    for (let k = 0; k < m; k++) {
+      r22[k] = re[k * step];
+      i2[k] = im[k * step];
+    }
+    const full = (p0, p1) => {
+      const a0 = (p0 - 0.5 * p1) * d, da = p1 * d * step / (n - 1);
+      let c = Math.cos(a0), s = Math.sin(a0);
+      const dc = Math.cos(da), ds = Math.sin(da);
+      let neg = 0, pos = 0;
+      for (let k = 0; k < m; k++) {
+        const r = r22[k] * c - i2[k] * s;
+        if (r < 0) neg -= r;
+        else pos += r;
+        const nc = c * dc - s * ds;
+        s = s * dc + c * ds;
+        c = nc;
+      }
+      return neg / (pos || 1);
+    };
+    let fb = { c: Infinity, p0: 0, p1: 0 };
+    for (let p1 = -360; p1 <= 360; p1 += 15) {
+      for (let p0 = -180; p0 < 180; p0 += 10) {
+        const c = full(p0, p1);
+        if (c < fb.c) fb = { c, p0, p1 };
+      }
+    }
+    const alt = nelderMead((v) => full(v[0], v[1]), [fb.p0, fb.p1], [5, 8], 150);
+    if (opts.wholeSpectrum !== false && full(alt[0], alt[1]) < 0.5 * full(res[0], res[1])) res = alt;
     let ph0 = (res[0] + 540) % 360 - 180;
     return { ph0, ph1: res[1] };
   }
@@ -1403,31 +1557,35 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const thr = Math.max(snr * noise, (opts.minRelative ?? 2e-3) * max);
     const hzPerPt = Math.abs(ax.step) * spec.frequency;
     const win = Math.max(2, Math.round(1.5 / hzPerPt));
+    const maxWin = Math.max(win, Math.round(40 / hzPerPt));
     const peaks = [];
     for (let i = 2; i < n - 2; i++) {
       const v = y[i];
       if (v < thr || v < y[i - 1] || v < y[i + 1]) continue;
       if (v === y[i - 1]) continue;
-      let lmin = v, rmin = v, ok = true;
-      for (let k = 1; k <= win; k++) {
-        if (i - k >= 0) {
-          if (y[i - k] > v) {
-            ok = false;
-            break;
+      let found = false;
+      for (let w = win; w <= maxWin && !found; w *= 4) {
+        let lmin = v, rmin = v, ok = true;
+        for (let k = 1; k <= w; k++) {
+          if (i - k >= 0) {
+            if (y[i - k] > v) {
+              ok = false;
+              break;
+            }
+            lmin = Math.min(lmin, y[i - k]);
           }
-          lmin = Math.min(lmin, y[i - k]);
-        }
-        if (i + k < n) {
-          if (y[i + k] > v) {
-            ok = false;
-            break;
+          if (i + k < n) {
+            if (y[i + k] > v) {
+              ok = false;
+              break;
+            }
+            rmin = Math.min(rmin, y[i + k]);
           }
-          rmin = Math.min(rmin, y[i + k]);
         }
+        if (!ok) break;
+        found = v - Math.max(lmin, rmin) >= Math.max(3 * noise, 0.03 * v);
       }
-      if (!ok) continue;
-      const prom = v - Math.max(lmin, rmin);
-      if (prom < Math.max(3 * noise, 0.03 * v)) continue;
+      if (!found) continue;
       const a = y[i - 1], b = v, c = y[i + 1];
       const den = a - 2 * b + c;
       const d = den !== 0 ? 0.5 * (a - c) / den : 0;
@@ -1460,7 +1618,8 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         const gap = (p.index - last.index) * hzPerPt;
         let minBetween = Infinity;
         for (let k = last.index; k <= p.index; k++) minBetween = Math.min(minBetween, y[k]);
-        if (gap <= gapHz || minBetween > 0.5 * Math.min(last.height, p.height) + 3 * noise) {
+        const lopsided = gap > gapHz && Math.min(last.height, p.height) < 0.05 * Math.max(...g.map((q) => q.height), p.height);
+        if (gap <= gapHz || !lopsided && minBetween > 0.5 * Math.min(last.height, p.height) + 3 * noise) {
           g.push(p);
           continue;
         }
@@ -1489,7 +1648,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
           lo = y[k];
           cut = k;
         }
-        if (lo < 0.3 * Math.min(m.top, r.top)) {
+        if (lo < 0.3 * Math.min(m.top, r.top) || Math.min(m.top, r.top) < 0.05 * Math.max(m.top, r.top)) {
           m.to = cut;
           merged.push({ ...r, from: cut + 1, peaks: r.peaks.slice() });
           continue;
@@ -1861,6 +2020,15 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     { name: "Propanal", formula: "C3H6O", h: [[9.79, "t", 1], [2.46, "qd", 2], [1.11, "t", 3]], c: [203, 37.3, 6] },
     { name: "Cytisine", formula: "C11H14N2O", h: [[7.29, "dd", 1], [6.43, "d", 1], [5.98, "d", 1], [4.09, "d", 1], [3.89, "dd", 1], [3, "m", 4], [2.31, "m", 1], [1.93, "m", 2]], c: [163.6, 151.1, 138.7, 116.7, 104.9, 53.7, 52.8, 49.9, 35.5, 27.6, 26.2] },
     { name: "Rutin (DMSO-d\u2086)", formula: "C27H30O16", solvent: "DMSO-d6", h: [[12.59, "s", 1], [7.55, "m", 2], [6.84, "d", 1], [6.39, "d", 1], [6.19, "d", 1], [5.34, "d", 1], [4.38, "s", 1], [3.3, "m", 10], [0.99, "d", 3]], c: [177.4, 164.1, 161.2, 156.6, 156.4, 148.4, 144.8, 133.3, 121.6, 121.2, 116.3, 115.2, 104, 101.2, 100.8, 98.7, 93.6, 76.5, 75.9, 74.1, 72, 70.6, 70.4, 70, 68.3, 67, 17.7] },
+    // Polymers (repeat unit, CDCl3).
+    { name: "cis-1,4-Polyisoprene (natural rubber)", formula: "C5H8", polymer: true, h: [[5.12, "br s", 1], [2.03, "br s", 4], [1.68, "s", 3]], c: [135.2, 125, 32.2, 26.4, 23.4] },
+    { name: "trans-1,4-Polyisoprene (gutta-percha)", formula: "C5H8", polymer: true, h: [[5.12, "br s", 1], [2, "br s", 4], [1.6, "s", 3]], c: [134.9, 124.2, 39.7, 26.7, 16] },
+    { name: "1,4-Polybutadiene", formula: "C4H6", polymer: true, h: [[5.4, "br s", 2], [2.06, "br s", 4]], c: [130, 129.5, 32.7, 27.4] },
+    { name: "Polystyrene", formula: "C8H8", polymer: true, h: [[7.06, "m", 3], [6.57, "m", 2], [1.84, "m", 1], [1.42, "m", 2]], c: [145.3, 127.9, 125.6, 43.5, 40.4] },
+    { name: "Poly(methyl methacrylate) (PMMA)", formula: "C5H8O2", polymer: true, h: [[3.6, "s", 3], [1.81, "m", 2], [1.02, "s", 1.5], [0.84, "s", 1.5]], c: [177.8, 54.4, 51.8, 44.5, 18.7, 16.5] },
+    { name: "Poly(ethylene glycol) (PEG)", formula: "C2H4O", polymer: true, h: [[3.64, "s", 4]], c: [70.6] },
+    { name: "Poly(lactic acid) (PLA)", formula: "C3H4O2", polymer: true, h: [[5.16, "q", 1], [1.58, "d", 3]], c: [169.6, 69, 16.6] },
+    { name: "Poly(\u03B5-caprolactone) (PCL)", formula: "C6H10O2", polymer: true, h: [[4.06, "t", 2], [2.3, "t", 2], [1.65, "m", 4], [1.38, "m", 2]], c: [173.5, 64.1, 34.1, 28.3, 25.5, 24.6] },
     { name: "Strychnine", formula: "C21H22N2O2", h: [[8.09, "d", 1], [7.24, "m", 2], [7.09, "t", 1], [5.89, "m", 1], [4.28, "dt", 1], [4.13, "m", 1], [4.06, "dd", 1], [3.92, "d", 1], [3.85, "d", 1], [3.71, "m", 1], [3.17, "m", 2], [2.88, "m", 1], [2.7, "m", 2], [2.35, "m", 1], [1.89, "m", 2], [1.47, "m", 1], [1.27, "m", 1]], c: [169.3, 142.2, 140.5, 132.7, 128.6, 127.3, 124.2, 122.2, 116.2, 77.6, 64.6, 60.3, 60.1, 52.7, 52, 50.3, 48.2, 42.5, 42.4, 31.6, 26.9] }
   ];
   function searchReference(query, nucleus) {
@@ -2111,7 +2279,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       totalH: null,
       manualRegions: [],
       // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
-      autoReference: !!ds.fid && ["jeol", "nmrpipe", "magritek", "nmrml"].includes(ds.fid.origin),
+      autoReference: !!ds.fid && ["jeol", "nmrpipe", "magritek", "nmrml", "mnova"].includes(ds.fid.origin),
       excluded: []
     };
     let fftCache = null;
@@ -2130,7 +2298,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     function run() {
       const c = complexSpectrum();
       if (params.autoPhase && c.imag) {
-        const a2 = autoPhase(c.real, c.imag);
+        const a2 = autoPhase(c.real, c.imag, { wholeSpectrum: /1H/.test(ds.nucleus) });
         params.ph0 = Math.round(a2.ph0 * 10) / 10;
         params.ph1 = Math.round(a2.ph1 * 10) / 10;
         params.autoPhase = false;

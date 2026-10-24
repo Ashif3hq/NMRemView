@@ -21,4 +21,12 @@ for (const c of cases) {
   console.log(problems.length ? 'FAIL' : 'ok  ', c.file, problems.join('; '));
   if (problems.length) fail++;
 }
+// Private documents (not in git): every .mnova in tests/private must yield spectra.
+const priv = new URL('./private/', import.meta.url);
+if (fs.existsSync(priv)) for (const f of fs.readdirSync(priv).filter((x) => /\.mnova$/i.test(x))) {
+  const { datasets } = await N.loadFiles(new Map([[f, new Uint8Array(fs.readFileSync(new URL(f, priv)))]]));
+  const ok = datasets.length > 0 && datasets.every((d) => N.createSession(d).run().report.length > 20);
+  console.log(ok ? 'ok  ' : 'FAIL', `tests/private/${f}`, `${datasets.length} spectra`);
+  if (!ok) fail++;
+}
 process.exit(fail ? 1 : 0);

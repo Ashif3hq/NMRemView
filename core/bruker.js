@@ -29,7 +29,7 @@ const dec = (b) => new TextDecoder('latin1').decode(b);
 
 // files: Map of relative path -> Uint8Array for one experiment folder (paths relative to the
 // experiment directory, e.g. "acqus", "fid", "pdata/1/procs").
-export function readBruker(files, name = 'bruker') {
+export function readBruker(files, name = 'bruker', opts = {}) {
   const get = (p) => files.get(p);
   const acqusBuf = get('acqus');
   if (!acqusBuf) throw new Error('Bruker folder has no acqus file');
@@ -47,10 +47,10 @@ export function readBruker(files, name = 'bruker') {
   // Raw FID
   let fid = null;
   const fidBuf = get('fid');
-  if (fidBuf) {
+  if (fidBuf || opts.fidValues) {
     const td = num(acqus.$TD);
     const big = num(acqus.$BYTORDA) === 1;
-    const raw = readInts(fidBuf, big, num(acqus.$DTYPA) === 2);
+    const raw = opts.fidValues || readInts(fidBuf, big, num(acqus.$DTYPA) === 2);
     // TD counts real+imag points; files are padded to 256-value blocks.
     const n = Math.min(Math.floor((td || raw.length) / 2), Math.floor(raw.length / 2));
     const scale = Math.pow(2, num(acqus.$NC) || 0);

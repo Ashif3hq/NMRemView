@@ -3,3 +3,4 @@ node_modules/
 .build/
 *.xcuserstate
 .DS_Store
+tests/private/

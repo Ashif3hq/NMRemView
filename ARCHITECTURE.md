@@ -50,7 +50,7 @@ threshold changes run in ~30 ms on a 64k-point spectrum.
 | Magritek Spinsolve folders (acqu.par + data.1d / spectrum.1d) | Written, needs a real test file |
 | NMRPipe 1D `.fid` / `.ft` | Written, needs a real test file |
 | nmrML (open XML standard, zlib or plain) | Written, needs a real test file |
-| MestReNova `.mnova` | Closed format. Spectra embedded as JCAMP-DX (plain or zlib-compressed) are recovered; otherwise the app explains how to export JCAMP-DX from MestReNova. Needs sample files to go further. |
+| MestReNova `.mnova` | Closed Qt format, reverse-engineered. Bruker experiments are recovered: the original acqus/procs are stored as named qCompress blocks, and the FID follows as a big-endian byte count, a flag byte and little-endian float32 values. Tested on a 13-spectrum Mnova 15 document. Embedded JCAMP-DX is also read. Non-Bruker data inside .mnova is not yet supported. |
 | CSV/TXT two-column (ppm, intensity) | Done |
 | 2D (COSY, HSQC, HMBC) | Detected and skipped; planned |
 

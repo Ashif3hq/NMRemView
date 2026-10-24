@@ -67,7 +67,7 @@ export function applyPhase(re, im, ph0, ph1) {
 
 // Automatic phasing: minimise the negative-intensity fraction over signal regions,
 // coarse grid then Nelder-Mead refinement.
-export function autoPhase(re, im) {
+export function autoPhase(re, im, opts = {}) {
   const n = re.length;
   const mag = new Float64Array(n);
   let max = 0;
@@ -77,10 +77,10 @@ export function autoPhase(re, im) {
   const thr = Math.max(floor, max * 0.002);
   let idx = [];
   for (let i = 0; i < n; i++) if (mag[i] > thr) idx.push(i);
-  if (idx.length > 6000) {
-    const stride = idx.length / 6000;
+  if (idx.length > 4000) {
+    const stride = idx.length / 4000;
     const keep = [];
-    for (let k = 0; k < 6000; k++) keep.push(idx[Math.floor(k * stride)]);
+    for (let k = 0; k < 4000; k++) keep.push(idx[Math.floor(k * stride)]);
     idx = keep;
   }
   if (!idx.length) return { ph0: 0, ph1: 0 };
@@ -101,13 +101,55 @@ export function autoPhase(re, im) {
     return neg / (tot || 1) - (sum > 0 ? 0.001 : 0);
   };
   let best = { c: Infinity, p0: 0, p1: 0 };
+  const L = idx.length, rp = new Float64Array(L), ip = new Float64Array(L);
   for (let p1 = -180; p1 <= 180; p1 += 15) {
+    // Apply the first-order term once per p1; each p0 is then a constant rotation.
+    for (let k = 0; k < L; k++) {
+      const p = p1 * fr[k] * d, c = Math.cos(p), s = Math.sin(p);
+      rp[k] = rr[k] * c - ii[k] * s; ip[k] = rr[k] * s + ii[k] * c;
+    }
     for (let p0 = -180; p0 < 180; p0 += 10) {
-      const c = cost(p0, p1);
+      const c0 = Math.cos(p0 * d), s0 = Math.sin(p0 * d);
+      let neg = 0, tot = 0, sum = 0;
+      for (let k = 0; k < L; k++) {
+        const r = rp[k] * c0 - ip[k] * s0;
+        if (r < 0) neg += r * r;
+        tot += r * r; sum += r;
+      }
+      const c = neg / (tot || 1) - (sum > 0 ? 0.001 : 0);
       if (c < best.c) best = { c, p0, p1 };
     }
   }
-  const res = nelderMead((v) => cost(v[0], v[1]), [best.p0, best.p1], [5, 8], 150);
+  let res = nelderMead((v) => cost(v[0], v[1]), [best.p0, best.p1], [5, 8], 150);
+  // Broad signals (polymers) spread beyond the signal mask, where the masked cost cannot see
+  // their dispersive tails. Also score negative area over the whole spectrum and keep
+  // whichever answer leaves less of it.
+  const step = Math.max(1, Math.floor(n / 8192));
+  const m = Math.floor(n / step);
+  const r2 = new Float64Array(m), i2 = new Float64Array(m);
+  for (let k = 0; k < m; k++) { r2[k] = re[k * step]; i2[k] = im[k * step]; }
+  const full = (p0, p1) => {
+    // The phase is linear in k, so rotate by a fixed increment instead of calling cos/sin.
+    const a0 = (p0 - 0.5 * p1) * d, da = (p1 * d * step) / (n - 1);
+    let c = Math.cos(a0), s = Math.sin(a0);
+    const dc = Math.cos(da), ds = Math.sin(da);
+    let neg = 0, pos = 0;
+    for (let k = 0; k < m; k++) {
+      const r = r2[k] * c - i2[k] * s;
+      if (r < 0) neg -= r; else pos += r;
+      const nc = c * dc - s * ds; s = s * dc + c * ds; c = nc;
+    }
+    return neg / (pos || 1);
+  };
+  let fb = { c: Infinity, p0: 0, p1: 0 };
+  for (let p1 = -360; p1 <= 360; p1 += 15) {
+    for (let p0 = -180; p0 < 180; p0 += 10) {
+      const c = full(p0, p1);
+      if (c < fb.c) fb = { c, p0, p1 };
+    }
+  }
+  const alt = nelderMead((v) => full(v[0], v[1]), [fb.p0, fb.p1], [5, 8], 150);
+  if (opts.wholeSpectrum !== false && full(alt[0], alt[1]) < 0.5 * full(res[0], res[1])) res = alt;
   let ph0 = ((res[0] + 540) % 360) - 180;
   return { ph0, ph1: res[1] };
 }

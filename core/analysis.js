@@ -13,19 +13,24 @@ export function pickPeaks(spec, opts = {}) {
   const hzPerPt = Math.abs(ax.step) * spec.frequency;
   // Prominence window of ~1.5 Hz either side suppresses noise ripples on peak flanks.
   const win = Math.max(2, Math.round(1.5 / hzPerPt));
+  const maxWin = Math.max(win, Math.round(40 / hzPerPt));
   const peaks = [];
   for (let i = 2; i < n - 2; i++) {
     const v = y[i];
     if (v < thr || v < y[i - 1] || v < y[i + 1]) continue;
     if (v === y[i - 1]) continue;
-    let lmin = v, rmin = v, ok = true;
-    for (let k = 1; k <= win; k++) {
-      if (i - k >= 0) { if (y[i - k] > v) { ok = false; break; } lmin = Math.min(lmin, y[i - k]); }
-      if (i + k < n) { if (y[i + k] > v) { ok = false; break; } rmin = Math.min(rmin, y[i + k]); }
+    // Broad lines (polymers, exchangeable H) have flat tops, so widen the window if needed.
+    let found = false;
+    for (let w = win; w <= maxWin && !found; w *= 4) {
+      let lmin = v, rmin = v, ok = true;
+      for (let k = 1; k <= w; k++) {
+        if (i - k >= 0) { if (y[i - k] > v) { ok = false; break; } lmin = Math.min(lmin, y[i - k]); }
+        if (i + k < n) { if (y[i + k] > v) { ok = false; break; } rmin = Math.min(rmin, y[i + k]); }
+      }
+      if (!ok) break;
+      found = v - Math.max(lmin, rmin) >= Math.max(3 * noise, 0.03 * v);
     }
-    if (!ok) continue;
-    const prom = v - Math.max(lmin, rmin);
-    if (prom < Math.max(3 * noise, 0.03 * v)) continue;
+    if (!found) continue;
     // Parabolic interpolation for sub-point position.
     const a = y[i - 1], b = v, c = y[i + 1];
     const den = a - 2 * b + c;
@@ -60,7 +65,9 @@ export function findMultiplets(spec, peaks, noise, opts = {}) {
       // Merge when lines are close or genuinely overlap (deep valley not reached).
       let minBetween = Infinity;
       for (let k = last.index; k <= p.index; k++) minBetween = Math.min(minBetween, y[k]);
-      if (gap <= gapHz || minBetween > 0.5 * Math.min(last.height, p.height) + 3 * noise) { g.push(p); continue; }
+      // A weak line sitting on a strong line's tail is its own signal, not part of that multiplet.
+      const lopsided = gap > gapHz && Math.min(last.height, p.height) < 0.05 * Math.max(...g.map((q) => q.height), p.height);
+      if (gap <= gapHz || (!lopsided && minBetween > 0.5 * Math.min(last.height, p.height) + 3 * noise)) { g.push(p); continue; }
     }
     groups.push([p]);
   }
@@ -86,7 +93,7 @@ export function findMultiplets(spec, peaks, noise, opts = {}) {
       let cut = m.to, lo = Infinity;
       const s0 = m.peaks[m.peaks.length - 1].index, s1 = r.peaks[0].index;
       for (let k = s0; k <= s1; k++) if (y[k] < lo) { lo = y[k]; cut = k; }
-      if (lo < 0.3 * Math.min(m.top, r.top)) { m.to = cut; merged.push({ ...r, from: cut + 1, peaks: r.peaks.slice() }); continue; }
+      if (lo < 0.3 * Math.min(m.top, r.top) || Math.min(m.top, r.top) < 0.05 * Math.max(m.top, r.top)) { m.to = cut; merged.push({ ...r, from: cut + 1, peaks: r.peaks.slice() }); continue; }
       m.to = Math.max(m.to, r.to); m.peaks.push(...r.peaks); m.top = Math.max(m.top, r.top);
     }
     else merged.push({ ...r, peaks: r.peaks.slice() });

@@ -10,4 +10,4 @@ export { processDataset, transformFid, defaultProcessing, applyPhase, autoPhase,
 export { analyse, pickPeaks, findMultiplets, integrateRange, describeMultiplet, normaliseIntegrals } from './analysis.js';
 export { suggest, candidateGroups, journalReport, formulaInfo, matchCompounds, fragmentHints } from './assign.js';
 export { SHIFT_GROUPS, ELEMENTS, SOLVENTS, IMPURITIES, COUPLINGS, COMPOUNDS, searchReference, findSolvent } from './database.js';
-export { POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea } from './polymer.js';
+export { POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea } from './polymer.js';

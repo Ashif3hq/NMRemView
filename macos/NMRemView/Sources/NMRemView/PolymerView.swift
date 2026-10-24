@@ -13,6 +13,7 @@ struct PolymerView: View {
     @State private var m0 = 68.12
     @State private var endId = "custom"
     @State private var endSig: Double? = nil
+    @State private var useEndWindow = false
     @State private var endH = 1.0
     @State private var endCount = 1
     @State private var endMass = 0.0
@@ -28,6 +29,7 @@ struct PolymerView: View {
 
     private var library: PolymerLibrary? { store.polymerLibrary }
     private var preset: PolymerPreset? { library?.polymers.first { $0.id == polymerId } }
+    private var endPreset: EndGroupPreset? { library?.endGroups.first { $0.id == endId } }
     private var signals: [Signal] { result.signals.filter { !$0.excluded }.sorted { $0.ppm > $1.ppm } }
 
     private func label(_ s: Signal) -> String {
@@ -39,7 +41,8 @@ struct PolymerView: View {
             "polymer": polymerId,
             "repeatSig": repeatSig.map { $0 as Any } ?? "window",
             "repeatH": repeatH, "m0": m0,
-            "endSig": endSig.map { $0 as Any } ?? NSNull(),
+            "end": endId,
+            "endSig": useEndWindow && endPreset?.window != nil ? "window" : (endSig.map { $0 as Any } ?? NSNull()),
             "endH": endH, "endCount": endCount, "endMass": endMass,
             "comps": comps.map { ["name": $0.name, "sig": $0.sig.map { $0 as Any } ?? NSNull(), "nH": $0.nH, "m0": $0.m0] as [String: Any] },
         ]
@@ -69,10 +72,17 @@ struct PolymerView: View {
                     Picker("Type", selection: $endId) {
                         ForEach(library?.endGroups ?? []) { g in Text(g.ppm.isEmpty ? g.name : "\(g.name) · \(g.ppm)").tag(g.id) }
                     }
-                    Picker("Its signal", selection: $endSig) {
-                        Text("Choose a signal").tag(Double?.none)
-                        ForEach(signals) { s in Text(label(s)).tag(Optional(s.ppm)) }
+                    if let w = endPreset?.window, w.count == 2 {
+                        Toggle("Standard window δ \(w[0], specifier: "%g")–\(w[1], specifier: "%g") (local baseline)", isOn: $useEndWindow)
                     }
+                    if !(useEndWindow && endPreset?.window != nil) {
+                        Picker("Its signal", selection: $endSig) {
+                            Text("Choose a signal").tag(Double?.none)
+                            ForEach(signals) { s in Text(label(s)).tag(Optional(s.ppm)) }
+                        }
+                    }
+                    if let ei = res?.endIntegral { LabeledContent("End-group integral", value: String(format: "%.3f", ei)) }
+                    if let note = endPreset?.note { Text(note).font(.caption).foregroundStyle(.secondary) }
                     number("H in that signal", $endH)
                     Stepper("End groups per chain: \(endCount)", value: $endCount, in: 1...4)
                     number("End-group mass, both ends (g/mol)", $endMass)
@@ -140,12 +150,20 @@ struct PolymerView: View {
                 }
             }
             .formStyle(.grouped)
-            .onAppear(perform: guessPolymer)
+            .onAppear {
+                guessPolymer()
+                // Reuse the end group from the previous spectrum (same RAFT agent across a series).
+                if let last = UserDefaults.standard.string(forKey: "lastEndGroup"), let g = library?.endGroups.first(where: { $0.id == last }) {
+                    endId = g.id; endH = g.nH; endMass = (g.mass * 100).rounded() / 100; useEndWindow = g.window != nil
+                }
+            }
             .onChange(of: polymerId) {
                 if let p = preset { repeatH = p.nH; m0 = (p.m0 * 100).rounded() / 100; repeatSig = nil }
             }
             .onChange(of: endId) {
-                if let g = library?.endGroups.first(where: { $0.id == endId }), g.id != "custom" { endH = g.nH; endMass = (g.mass * 100).rounded() / 100 }
+                if let g = library?.endGroups.first(where: { $0.id == endId }), g.id != "custom" { endH = g.nH; endMass = (g.mass * 100).rounded() / 100; endCount = 1 }
+                useEndWindow = endPreset?.window != nil
+                UserDefaults.standard.set(endId, forKey: "lastEndGroup")
             }
         }
     }

@@ -1,7 +1,7 @@
 // A Session wraps one dataset and its processing state, caching the expensive FFT so
 // phase/baseline/threshold changes are interactive. Used by both the web and macOS apps.
 import { transformFid, autoPhase, applyPhase, baselineCorrect, defaultProcessing, ppmAxis } from './processing.js';
-import { analyse, describeMultiplet, applyIntegralUnit } from './analysis.js';
+import { analyse, describeMultiplet, applyIntegralUnit, integrateRange } from './analysis.js';
 import { suggest, journalReport, formulaInfo } from './assign.js';
 import { findSolvent } from './database.js';
 
@@ -74,8 +74,8 @@ export function createSession(ds) {
         const hi = Math.max(p1, p2), lo = Math.min(p1, p2);
         signals = signals.filter((m) => m.ppmTo > hi || m.ppmFrom < lo);
         const from = Math.max(0, Math.round(ax.index(hi))), to = Math.min(spec.real.length - 1, Math.round(ax.index(lo)));
-        let s = 0;
-        for (let k = from; k <= to; k++) s += spec.real[k];
+        // Manual regions get a local straight baseline, as small end-group signals need.
+        const s = integrateRange(spec, hi, lo, { local: true }).area / Math.abs(ax.step);
         const peaks = a.peaks.filter((p) => p.ppm <= hi && p.ppm >= lo);
         if (!peaks.length) peaks.push({ ppm: (hi + lo) / 2, height: 0, widthHz: 0, index: Math.round((from + to) / 2) });
         const m = describeMultiplet({ from, to, peaks, area: s * Math.abs(ax.step), ppmFrom: hi, ppmTo: lo }, spec.frequency);

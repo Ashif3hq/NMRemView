@@ -230,7 +230,9 @@ function polyState(it) {
       if (guess) break;
     }
     guess = guess || NMR.POLYMERS[0];
-    it.poly = { polymer: guess.id, repeatSig: 'window', repeatH: guess.signal.nH, m0: +guess.m0.toFixed(2), end: 'custom', endSig: '', endH: 1, endCount: 1, endMass: 0, comps: [] };
+    // Reuse the end group chosen on the previous spectrum (same RAFT agent across a series).
+    const e = state.lastEnd;
+    it.poly = { polymer: guess.id, repeatSig: 'window', repeatH: guess.signal.nH, m0: +guess.m0.toFixed(2), end: e ? e.end : 'custom', endSig: e && e.window ? 'window' : '', endH: e ? e.endH : 1, endCount: e ? e.endCount : 1, endMass: e ? e.endMass : 0, comps: [] };
   }
   return it.poly;
 }
@@ -256,17 +258,19 @@ function polymerCalc(it) {
   let repeat = null;
   if (P.repeatSig === 'window' && poly) repeat = { area: NMR.repeatArea(it.result.spectrum, poly), nH: P.repeatH };
   else if (P.repeatSig) { const s = sigArea(it, P.repeatSig); if (s) repeat = { area: s.area, nH: P.repeatH }; }
-  const e = P.endSig ? sigArea(it, P.endSig) : null;
-  const end = e ? { area: e.area, nH: P.endH, count: P.endCount } : null;
+  const preset = NMR.END_GROUPS.find((g) => g.id === P.end);
+  let endArea = null;
+  if (P.endSig === 'window' && preset && preset.window) endArea = NMR.windowArea(it.result.spectrum, preset.window[0], preset.window[1]);
+  else if (P.endSig) { const e = sigArea(it, P.endSig); if (e) endArea = e.area; }
+  const end = endArea != null ? { area: endArea, nH: P.endH, count: P.endCount } : null;
   const dp = NMR.degreeOfPolymerisation({ repeat, end, m0: P.m0, endMass: P.endMass });
   const comp = NMR.composition(P.comps.map((c) => { const s = sigArea(it, c.sig); return { name: c.name, area: s ? s.area : 0, nH: c.nH, m0: c.m0 }; }));
-  return { P, poly, repeat, end, dp, comp, u };
+  return { P, poly, repeat, end, dp, comp, u, endPreset: preset };
 }
 
 function polymerHTML(it) {
   if (!/1H/.test(it.ds.nucleus)) return '<p class="assign alt">Polymer tools use ¹H integrals. Open a ¹H spectrum.</p>';
-  const { P, poly, repeat, dp, comp, u } = polymerCalc(it);
-  const endPreset = NMR.END_GROUPS.find((g) => g.id === P.end);
+  const { P, poly, repeat, end, dp, comp, u, endPreset } = polymerCalc(it);
   const micro = poly && poly.micro ? NMR.microstructure(it.result.spectrum, poly.micro) : null;
   const repeatInt = repeat ? repeat.area / u : null;
   const summary = dp ? `DP(¹H NMR) = ${fmt(dp.dp, 1)}${dp.mn ? `, Mn(NMR) = ${Math.round(dp.mn).toLocaleString('en-US')} g/mol` : ''} (${poly ? poly.name : 'repeat unit'}, M₀ = ${fmt(P.m0)} g/mol; end group ${endPreset ? endPreset.name : ''}, ${P.endH}H)` : '';
@@ -278,7 +282,9 @@ function polymerHTML(it) {
   </div></div>
   <div class="section"><h3>End group</h3><div class="poly">
     <div class="row"><label for="pEnd">Type</label><select id="pEnd">${NMR.END_GROUPS.map((g) => `<option value="${g.id}" ${g.id === P.end ? 'selected' : ''}>${esc(g.name)}${g.ppm ? ' · ' + esc(g.ppm) : ''}</option>`).join('')}</select></div>
-    <div class="row"><label for="pEndSig">Its signal</label><select id="pEndSig">${sigOptions(it, P.endSig)}</select></div>
+    <div class="row"><label for="pEndSig">Its signal</label><select id="pEndSig">${sigOptions(it, P.endSig, endPreset && endPreset.window ? `<option value="window" ${P.endSig === 'window' ? 'selected' : ''}>Standard window: δ ${endPreset.window[0]}–${endPreset.window[1]} (local baseline)</option>` : '')}</select></div>
+    ${end ? `<p class="assign alt">End-group integral: <b class="mono">${fmt(end.area / u, 3)}</b> on the current scale.</p>` : ''}
+    ${endPreset && endPreset.note ? `<p class="assign alt">${esc(endPreset.note)}</p>` : ''}
     <div class="row"><label>H in signal · ends/chain</label><div class="pair"><input id="pEndH" type="number" min="0.1" step="any" value="${P.endH}" aria-label="Protons in end-group signal"><input id="pEndN" type="number" min="1" step="1" value="${P.endCount}" aria-label="End groups per chain"></div></div>
     <div class="row"><label for="pEndM">End-group mass, both ends (g/mol)</label><input id="pEndM" type="number" min="0" step="any" value="${P.endMass}"></div>
     <p class="assign alt">End-group signals are usually small. If yours is not in the list, choose <b>Integrate</b> in the toolbar and drag across it.</p>
@@ -324,7 +330,9 @@ function bindPolymer(it) {
   on('pEnd', 'change', (e) => {
     P.end = e.target.value;
     const g = NMR.END_GROUPS.find((x) => x.id === P.end);
-    if (g && g.id !== 'custom') { P.endH = g.nH; P.endMass = +g.mass.toFixed(2); }
+    if (g && g.id !== 'custom') { P.endH = g.nH; P.endMass = +g.mass.toFixed(2); P.endCount = 1; }
+    P.endSig = g && g.window ? 'window' : '';
+    state.lastEnd = { end: P.end, endH: P.endH, endCount: P.endCount, endMass: P.endMass, window: !!(g && g.window) };
     redraw();
   });
   on('pEndSig', 'change', (e) => { P.endSig = e.target.value; redraw(); });

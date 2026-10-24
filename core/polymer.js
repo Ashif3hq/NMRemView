@@ -37,6 +37,10 @@ export const END_GROUPS = [
   { id: 'cdtpa', name: 'RAFT: CDTPA (trithiocarbonate, S–CH₂)', nH: 2, ppm: '3.2–3.35 (S–CH₂C₁₁H₂₃)', mass: mw('C19H33NO2S3') },
   { id: 'cpdb', name: 'RAFT: CPDB (dithiobenzoate, o-Ar–H)', nH: 2, ppm: '7.85–8.0 (o-Ar–H)', mass: mw('C11H11NS2') },
   { id: 'cpadb', name: 'RAFT: CPADB (dithiobenzoate, o-Ar–H)', nH: 2, ppm: '7.85–8.0 (o-Ar–H)', mass: mw('C13H13NO2S2') },
+  { id: 'dbttc-s', name: 'RAFT: S,S-dibenzyl trithiocarbonate (ω CH₂–S)', nH: 4, ppm: '3.85–4.2 (2 × CH₂–SC(S)S)', mass: mw('C15H14S3'), window: [4.2, 3.82],
+    note: 'DBTTC sits mid-chain (Bn–P–SC(S)S–P–Bn): 4H per chain, DP counts both arms. Comonomers with OCH₂ (acrylates) overlap here.' },
+  { id: 'dbttc-bn', name: 'RAFT: S,S-dibenzyl trithiocarbonate (α PhCH₂)', nH: 4, ppm: '2.55–2.8 (2 × PhCH₂–)', mass: mw('C15H14S3'), window: [2.78, 2.56],
+    note: 'Benzyl CH₂ at both chain ends: 4H per chain, DP counts both arms.' },
   { id: 'tms', name: 'Trimethylsilyl', nH: 9, ppm: '0.0–0.2 (Si(CH₃)₃)', mass: mw('C3H9Si') },
   { id: 'vinyl', name: 'Vinyl / methacrylate end (=CH₂)', nH: 2, ppm: '4.6–6.2 (=CH₂)', mass: mw('C2H3') },
   { id: 'cho', name: 'Aldehyde (–CHO)', nH: 1, ppm: '9.5–9.8 (CHO)', mass: mw('CHO') },
@@ -112,6 +116,11 @@ export function microstructure(spec, kind) {
     };
   }
   return null;
+}
+
+// End-group window integral with a local baseline.
+export function windowArea(spec, hi, lo) {
+  return integrateRange(spec, hi, lo, { local: true }).area;
 }
 
 // Area of the polymer's counting window, for pre-filling the repeat-unit integral.

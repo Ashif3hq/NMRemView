@@ -76,3 +76,4 @@ spectrum and proposes structures from the peak table, formula and fragment hints
 * `microstructure`: fixed CDCl₃ windows. Polyisoprene: 1,4 (=CH 5.12, 1H), 3,4 (=CH₂ 4.6–4.8, 2H), 1,2 (CH= 5.7–5.9, 1H), cis/trans from CH₃ 1.68 / 1.60. Polybutadiene: 1,2 from =CH₂ 4.9–5.0, 1,4 from the remaining olefinic area.
 * Integral normalisation: session param `integralRef = { ppm, value }` scales every integral so the one containing `ppm` equals `value`.
 
+* End-group presets can carry a standard window integrated with a local straight baseline (`windowArea`); manual integral regions also use a local baseline. S,S-Dibenzyl trithiocarbonate (DBTTC) has two: ω CH₂–S (3.82–4.2, 4H/chain) and α PhCH₂ (2.56–2.78, 4H/chain); on Ashif's polymyrcene series they agree within ~10 %.

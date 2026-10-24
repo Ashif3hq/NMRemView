@@ -2,7 +2,7 @@
 // globalThis.NMRBridge so Swift never has to touch JS objects directly.
 import {
   loadExpanded, createSession, searchReference, SOLVENTS, IMPURITIES, COUPLINGS,
-  POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea,
+  POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea,
 } from '../../core/index.js';
 
 const sessions = new Map();
@@ -86,10 +86,10 @@ globalThis.NMRBridge = {
   polymerLibrary() {
     return JSON.stringify({
       polymers: POLYMERS.map((p) => ({ id: p.id, name: p.name, unit: p.unit, m0: p.m0, signalLabel: p.signal.label, from: p.signal.from, to: p.signal.to, nH: p.signal.nH, micro: p.micro || '' })),
-      endGroups: END_GROUPS.map((g) => ({ id: g.id, name: g.name, nH: g.nH, ppm: g.ppm, mass: g.mass })),
+      endGroups: END_GROUPS.map((g) => ({ id: g.id, name: g.name, nH: g.nH, ppm: g.ppm, mass: g.mass, window: g.window || null, note: g.note || null })),
     });
   },
-  // config: { polymer, repeatSig ('window' | ppm), repeatH, m0, endSig (ppm | null), endH, endCount, endMass,
+  // config: { polymer, repeatSig ('window' | ppm), repeatH, m0, end, endSig ('window' | ppm | null), endH, endCount, endMass,
   //           comps: [{ name, sig, nH, m0 }] }. Signals are named by their centre ppm.
   polymer(id, configJSON) {
     const r = lastResults.get(id);
@@ -101,12 +101,14 @@ globalThis.NMRBridge = {
     let repeat = null;
     if (c.repeatSig === 'window' && poly) repeat = { area: repeatArea(r.spectrum, poly), nH: c.repeatH };
     else { const m = at(c.repeatSig); if (m) repeat = { area: m.area, nH: c.repeatH }; }
-    const e = at(c.endSig);
-    const dp = degreeOfPolymerisation({ repeat, end: e ? { area: e.area, nH: c.endH, count: c.endCount || 1 } : null, m0: c.m0, endMass: c.endMass });
+    const g = END_GROUPS.find((x) => x.id === c.end);
+    const endArea = c.endSig === 'window' && g && g.window ? windowArea(r.spectrum, g.window[0], g.window[1]) : (at(c.endSig) || {}).area;
+    const dp = degreeOfPolymerisation({ repeat, end: endArea != null ? { area: endArea, nH: c.endH, count: c.endCount || 1 } : null, m0: c.m0, endMass: c.endMass });
     const comp = composition((c.comps || []).map((x) => { const m = at(x.sig); return { name: x.name, area: m ? m.area : 0, nH: x.nH, m0: x.m0 }; }));
     const micro = poly && poly.micro ? microstructure(r.spectrum, poly.micro) : null;
     return JSON.stringify({
       repeatIntegral: repeat && r.integralUnit ? repeat.area / r.integralUnit : null,
+      endIntegral: endArea != null && r.integralUnit ? endArea / r.integralUnit : null,
       dp: dp ? dp.dp : null, mn: dp ? dp.mn : null,
       composition: comp.map((x) => ({ name: x.name, molPct: x.molPct, wtPct: x.wtPct })),
       microstructure: micro ? { rows: micro.rows, cis: micro.cisTrans ? micro.cisTrans.cis : null, trans: micro.cisTrans ? micro.cisTrans.trans : null, note: micro.note } : null,

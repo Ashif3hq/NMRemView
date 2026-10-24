@@ -109,12 +109,21 @@ export function findMultiplets(spec, peaks, noise, opts = {}) {
   return merged.map((r) => describeMultiplet(r, freq));
 }
 
-export function integrateRange(spec, ppmA, ppmB) {
+// opts.local: subtract a straight line through the region's end points (each averaged over
+// ±0.01 ppm), so small signals on a sloping or offset baseline integrate correctly.
+export function integrateRange(spec, ppmA, ppmB, opts = {}) {
   const ax = ppmAxis(spec);
+  const y = spec.real;
   let a = Math.round(ax.index(Math.max(ppmA, ppmB))), b = Math.round(ax.index(Math.min(ppmA, ppmB)));
-  a = Math.max(0, a); b = Math.min(spec.real.length - 1, b);
+  a = Math.max(0, a); b = Math.min(y.length - 1, b);
+  let ya = 0, yb = 0;
+  if (opts.local && b > a) {
+    const w = Math.max(1, Math.round(0.01 / Math.abs(ax.step)));
+    const avg = (i) => { let s = 0, c = 0; for (let k = Math.max(0, i - w); k <= Math.min(y.length - 1, i + w); k++) { s += y[k]; c++; } return s / c; };
+    ya = avg(a); yb = avg(b);
+  }
   let s = 0;
-  for (let k = a; k <= b; k++) s += spec.real[k];
+  for (let k = a; k <= b; k++) s += y[k] - (ya + ((yb - ya) * (k - a)) / Math.max(1, b - a));
   return { from: a, to: b, area: s * Math.abs(ax.step), ppmFrom: ax.at(a), ppmTo: ax.at(b) };
 }
 

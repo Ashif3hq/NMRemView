@@ -139,6 +139,8 @@ struct EndGroupPreset: Codable, Identifiable, Hashable {
     let nH: Double
     let ppm: String
     let mass: Double
+    let window: [Double]?
+    let note: String?
 }
 
 struct PolymerLibrary: Codable {
@@ -151,6 +153,7 @@ struct PolymerResult: Codable {
     struct MicroRow: Codable, Hashable { let label: String; let pct: Double; let how: String }
     struct Micro: Codable { let rows: [MicroRow]; let cis: Double?; let trans: Double?; let note: String }
     let repeatIntegral: Double?
+    let endIntegral: Double?
     let dp: Double?
     let mn: Double?
     let composition: [Comp]

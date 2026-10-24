@@ -1668,13 +1668,28 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     }
     return merged.map((r) => describeMultiplet(r, freq));
   }
-  function integrateRange(spec, ppmA, ppmB) {
+  function integrateRange(spec, ppmA, ppmB, opts = {}) {
     const ax = ppmAxis(spec);
+    const y = spec.real;
     let a = Math.round(ax.index(Math.max(ppmA, ppmB))), b = Math.round(ax.index(Math.min(ppmA, ppmB)));
     a = Math.max(0, a);
-    b = Math.min(spec.real.length - 1, b);
+    b = Math.min(y.length - 1, b);
+    let ya = 0, yb = 0;
+    if (opts.local && b > a) {
+      const w = Math.max(1, Math.round(0.01 / Math.abs(ax.step)));
+      const avg = (i) => {
+        let s2 = 0, c = 0;
+        for (let k = Math.max(0, i - w); k <= Math.min(y.length - 1, i + w); k++) {
+          s2 += y[k];
+          c++;
+        }
+        return s2 / c;
+      };
+      ya = avg(a);
+      yb = avg(b);
+    }
     let s = 0;
-    for (let k = a; k <= b; k++) s += spec.real[k];
+    for (let k = a; k <= b; k++) s += y[k] - (ya + (yb - ya) * (k - a) / Math.max(1, b - a));
     return { from: a, to: b, area: s * Math.abs(ax.step), ppmFrom: ax.at(a), ppmTo: ax.at(b) };
   }
   var NAMES = { 1: "s", 2: "d", 3: "t", 4: "q", 5: "p", 6: "h", 7: "hept" };
@@ -2350,8 +2365,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
           const hi = Math.max(p1, p2), lo = Math.min(p1, p2);
           signals = signals.filter((m2) => m2.ppmTo > hi || m2.ppmFrom < lo);
           const from = Math.max(0, Math.round(ax.index(hi))), to = Math.min(spec.real.length - 1, Math.round(ax.index(lo)));
-          let s = 0;
-          for (let k = from; k <= to; k++) s += spec.real[k];
+          const s = integrateRange(spec, hi, lo, { local: true }).area / Math.abs(ax.step);
           const peaks = a.peaks.filter((p) => p.ppm <= hi && p.ppm >= lo);
           if (!peaks.length) peaks.push({ ppm: (hi + lo) / 2, height: 0, widthHz: 0, index: Math.round((from + to) / 2) });
           const m = describeMultiplet({ from, to, peaks, area: s * Math.abs(ax.step), ppmFrom: hi, ppmTo: lo }, spec.frequency);
@@ -2444,6 +2458,24 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     { id: "cdtpa", name: "RAFT: CDTPA (trithiocarbonate, S\u2013CH\u2082)", nH: 2, ppm: "3.2\u20133.35 (S\u2013CH\u2082C\u2081\u2081H\u2082\u2083)", mass: mw("C19H33NO2S3") },
     { id: "cpdb", name: "RAFT: CPDB (dithiobenzoate, o-Ar\u2013H)", nH: 2, ppm: "7.85\u20138.0 (o-Ar\u2013H)", mass: mw("C11H11NS2") },
     { id: "cpadb", name: "RAFT: CPADB (dithiobenzoate, o-Ar\u2013H)", nH: 2, ppm: "7.85\u20138.0 (o-Ar\u2013H)", mass: mw("C13H13NO2S2") },
+    {
+      id: "dbttc-s",
+      name: "RAFT: S,S-dibenzyl trithiocarbonate (\u03C9 CH\u2082\u2013S)",
+      nH: 4,
+      ppm: "3.85\u20134.2 (2 \xD7 CH\u2082\u2013SC(S)S)",
+      mass: mw("C15H14S3"),
+      window: [4.2, 3.82],
+      note: "DBTTC sits mid-chain (Bn\u2013P\u2013SC(S)S\u2013P\u2013Bn): 4H per chain, DP counts both arms. Comonomers with OCH\u2082 (acrylates) overlap here."
+    },
+    {
+      id: "dbttc-bn",
+      name: "RAFT: S,S-dibenzyl trithiocarbonate (\u03B1 PhCH\u2082)",
+      nH: 4,
+      ppm: "2.55\u20132.8 (2 \xD7 PhCH\u2082\u2013)",
+      mass: mw("C15H14S3"),
+      window: [2.78, 2.56],
+      note: "Benzyl CH\u2082 at both chain ends: 4H per chain, DP counts both arms."
+    },
     { id: "tms", name: "Trimethylsilyl", nH: 9, ppm: "0.0\u20130.2 (Si(CH\u2083)\u2083)", mass: mw("C3H9Si") },
     { id: "vinyl", name: "Vinyl / methacrylate end (=CH\u2082)", nH: 2, ppm: "4.6\u20136.2 (=CH\u2082)", mass: mw("C2H3") },
     { id: "cho", name: "Aldehyde (\u2013CHO)", nH: 1, ppm: "9.5\u20139.8 (CHO)", mass: mw("CHO") },
@@ -2512,6 +2544,9 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       };
     }
     return null;
+  }
+  function windowArea(spec, hi, lo) {
+    return integrateRange(spec, hi, lo, { local: true }).area;
   }
   function repeatArea(spec, polymer) {
     const A = (a, b) => Math.max(0, integrateRange(spec, a, b).area);
@@ -2628,10 +2663,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     polymerLibrary() {
       return JSON.stringify({
         polymers: POLYMERS.map((p) => ({ id: p.id, name: p.name, unit: p.unit, m0: p.m0, signalLabel: p.signal.label, from: p.signal.from, to: p.signal.to, nH: p.signal.nH, micro: p.micro || "" })),
-        endGroups: END_GROUPS.map((g) => ({ id: g.id, name: g.name, nH: g.nH, ppm: g.ppm, mass: g.mass }))
+        endGroups: END_GROUPS.map((g) => ({ id: g.id, name: g.name, nH: g.nH, ppm: g.ppm, mass: g.mass, window: g.window || null, note: g.note || null }))
       });
     },
-    // config: { polymer, repeatSig ('window' | ppm), repeatH, m0, endSig (ppm | null), endH, endCount, endMass,
+    // config: { polymer, repeatSig ('window' | ppm), repeatH, m0, end, endSig ('window' | ppm | null), endH, endCount, endMass,
     //           comps: [{ name, sig, nH, m0 }] }. Signals are named by their centre ppm.
     polymer(id, configJSON) {
       const r = lastResults.get(id);
@@ -2646,8 +2681,9 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         const m = at(c.repeatSig);
         if (m) repeat = { area: m.area, nH: c.repeatH };
       }
-      const e = at(c.endSig);
-      const dp = degreeOfPolymerisation({ repeat, end: e ? { area: e.area, nH: c.endH, count: c.endCount || 1 } : null, m0: c.m0, endMass: c.endMass });
+      const g = END_GROUPS.find((x) => x.id === c.end);
+      const endArea = c.endSig === "window" && g && g.window ? windowArea(r.spectrum, g.window[0], g.window[1]) : (at(c.endSig) || {}).area;
+      const dp = degreeOfPolymerisation({ repeat, end: endArea != null ? { area: endArea, nH: c.endH, count: c.endCount || 1 } : null, m0: c.m0, endMass: c.endMass });
       const comp = composition((c.comps || []).map((x) => {
         const m = at(x.sig);
         return { name: x.name, area: m ? m.area : 0, nH: x.nH, m0: x.m0 };
@@ -2655,6 +2691,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       const micro = poly && poly.micro ? microstructure(r.spectrum, poly.micro) : null;
       return JSON.stringify({
         repeatIntegral: repeat && r.integralUnit ? repeat.area / r.integralUnit : null,
+        endIntegral: endArea != null && r.integralUnit ? endArea / r.integralUnit : null,
         dp: dp ? dp.dp : null,
         mn: dp ? dp.mn : null,
         composition: comp.map((x) => ({ name: x.name, molPct: x.molPct, wtPct: x.wtPct })),

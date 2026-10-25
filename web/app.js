@@ -20,10 +20,12 @@ try { tabSaved = localStorage.getItem('nmremview.tab'); } catch (e) { /* storage
 if (tabSaved) state.tab = tabSaved;
 
 const viewer = new SpectrumViewer($('plot'), {
-  onHover: (ppm) => {
+  onHover: (ppm, pt) => {
     const it = cur();
     $('readout').textContent = ppm == null || !it ? '' : `δ ${ppm.toFixed(/13C/.test(it.ds.nucleus) ? 2 : 3)} ppm${it.ds.frequency ? ` · ${(ppm * it.ds.frequency).toFixed(1)} Hz` : ''}`;
+    showTip(it, ppm, pt);
   },
+  onContext: (ppm, pt) => openContext(ppm, pt),
   onRange: (a, b) => toolRange(a, b),
   onClickPpm: (ppm, pt) => toolClick(ppm, pt),
 });
@@ -527,8 +529,8 @@ function bindTab(it) {
 
 // ---------- Spectrum tools ----------
 const HINTS = {
-  zoom: 'Drag to zoom · shift-drag to pan · scroll for intensity · ctrl-scroll or pinch to zoom · double-click to fit',
-  pan: 'Drag left or right to move along the spectrum · scroll for intensity',
+  zoom: 'Scroll to zoom · drag to zoom to a region · shift-drag to pan · double-click to fit · right-click for more · ? for help',
+  pan: 'Drag left or right to move along the spectrum · scroll to zoom · shift-scroll for intensity',
   peakAdd: 'Click a peak to mark it (snaps to the top) · drag over a region to mark its tallest point',
   peakDel: 'Click near a peak to remove it · drag over a region to remove every peak in it',
   integrate: 'Drag across a signal to add an integral region',
@@ -720,6 +722,89 @@ function finishPick(it, mode, m, saved) {
   toast(`${mode === 'pickRepeat' ? 'Counting signal' : 'End-group signal'}: δ ${m.ppmFrom.toFixed(2)}–${m.ppmTo.toFixed(2)}`);
 }
 
+// ----- Hover tooltip: what the signal under the pointer is -----
+function showTip(it, ppm, pt) {
+  const el = $('tip');
+  if (!it || ppm == null || !pt || pt.dragging || !pt.inPlot || !$('pop').hidden || !$('ctxMenu').hidden) { el.hidden = true; return; }
+  const m = it.result.analysis.multiplets.find((x) => !x.excluded && ppm <= x.ppmFrom && ppm >= x.ppmTo);
+  if (!m) { el.hidden = true; return; }
+  const c13 = is13C(it);
+  const shift = !c13 && m.multiplicity === 'm' ? `${m.ppmFrom.toFixed(2)}–${m.ppmTo.toFixed(2)}` : m.ppm.toFixed(c13 ? 1 : 2);
+  const lab = labelFor(it, m);
+  el.innerHTML = `<b>δ ${shift}</b>${c13 ? '' : ` · ${esc(m.multiplicity)}${m.J && m.J.length ? `, J = ${m.J.map((j) => j.toFixed(1)).join(', ')} Hz` : ''} · <b>${(m.nH || 0).toFixed(2)}H</b>`}
+    ${lab ? `<div class="lab">${esc(lab)}</div>` : ''}${m.candidates && m.candidates[0] ? `<div class="env">${esc(m.candidates[0].group.name)}</div>` : ''}${m.flag ? `<div class="env">${esc(m.flag.label)}</div>` : ''}`;
+  el.hidden = false;
+  const wrap = $('plotwrap').getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = (pt.x + 14 + w < wrap.width ? pt.x + 14 : pt.x - w - 14) + 'px';
+  el.style.top = Math.max(4, Math.min(pt.y + 14, wrap.height - h - 4)) + 'px';
+}
+
+// ----- Right-click menu on the spectrum -----
+function openContext(ppm, pt) {
+  const it = cur(); if (!it) return;
+  closePop(); $('tip').hidden = true; $('exportMenu').hidden = true;
+  const c13 = is13C(it);
+  const m = sigAt(it, ppm);
+  const hit = viewer.annotationAt(pt.x, pt.y);
+  const items = [];
+  const add = (label, fn, key = '') => items.push({ label, fn, key });
+  const sep = () => items.push(null);
+  const as = (mode) => () => { const prev = viewer.mode; viewer.mode = mode; toolClick(ppm, pt); if (viewer.mode === mode) viewer.mode = prev; };
+  if (hit) { add(`Edit ${hit.a.kind} “${hit.a.text.slice(0, 24)}”…`, () => editAnnotation(it, hit.a.src, pt)); sep(); }
+  if (m) {
+    add('Zoom to this signal', () => { const w = Math.max(m.ppmFrom - m.ppmTo, c13 ? 1 : 0.05); viewer.zoomTo(m.ppmFrom + w * 1.2, m.ppmTo - w * 1.2); });
+  }
+  add('Zoom out', () => viewer.zoomBy(2), '−');
+  add('Fit whole spectrum', () => viewer.reset(), 'F');
+  sep();
+  add('Mark peak here', as('peakAdd'), 'K');
+  add('Remove nearest peak', as('peakDel'), 'X');
+  if (m && !c13) add('Set this integral to…', as('setint'), 'N');
+  add(m ? 'Label this signal…' : 'Label here…', as('label'), 'L');
+  add('Add note here…', as('note'), 'T');
+  add('Reference this peak…', as('reference'), 'R');
+  if (m && !c13) {
+    sep();
+    add('Use as polymer repeat-unit signal', () => finishPick(it, 'pickRepeat', m));
+    add('Use as polymer end-group signal', () => finishPick(it, 'pickEnd', m));
+  }
+  sep();
+  add(`Copy δ ${ppm.toFixed(c13 ? 2 : 3)}`, () => copyText(ppm.toFixed(c13 ? 2 : 3)));
+  if (m) add('Copy this signal for a report', () => copyText(`δ ${m.ppm.toFixed(c13 ? 1 : 2)}${c13 ? '' : ` (${m.multiplicity}${m.J && m.J.length ? `, J = ${m.J.map((j) => j.toFixed(1)).join(', ')} Hz` : ''}, ${Math.round(m.nH || 0)}H)`}`));
+  add('Export…', () => { const em = $('exportMenu'); em.hidden = false; em.style.right = '8px'; em.style.top = '8px'; });
+  const el = $('ctxMenu');
+  el.innerHTML = items.map((x, i) => (x ? `<button type="button" role="menuitem" data-ci="${i}">${esc(x.label)}${x.key ? `<kbd>${x.key}</kbd>` : ''}</button>` : '<hr>')).join('');
+  el.hidden = false;
+  const wrap = $('plotwrap').getBoundingClientRect();
+  el.style.right = 'auto';
+  el.style.left = Math.max(4, Math.min(pt.x, wrap.width - el.offsetWidth - 4)) + 'px';
+  el.style.top = Math.max(4, Math.min(pt.y, wrap.height - el.offsetHeight - 4)) + 'px';
+  el.onclick = (e) => { const b = e.target.closest('[data-ci]'); if (!b) return; el.hidden = true; items[+b.dataset.ci].fn(); };
+}
+function copyText(t) {
+  try { navigator.clipboard.writeText(t).then(() => toast(`Copied ${t.length > 40 ? 'to clipboard' : t}`), () => toast(t)); } catch (e) { toast(t); }
+}
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#ctxMenu')) $('ctxMenu').hidden = true; });
+
+function showHelp() {
+  const rows = [
+    ['Scroll wheel / pinch', 'Zoom in and out around the pointer'],
+    ['Shift or ⌥ + scroll', 'Change the vertical scale'],
+    ['Sideways swipe', 'Pan along the spectrum'],
+    ['Drag', 'Zoom to a region (or use the active tool)'],
+    ['Middle-drag or Shift-drag', 'Pan'],
+    ['Double-click', 'Fit the whole spectrum'],
+    ['Right-click', 'Menu for the signal under the pointer'],
+    ['Hover a signal', 'Shows δ, multiplicity, J, integral and label'],
+    ['Z H K X I N R L T', 'Zoom, Pan, Peak +, Peak −, Integrate, ∫ = n, δ ref, Label, Note'],
+    ['F · Esc', 'Fit · back to Zoom'],
+    ['⌘/Ctrl Z · ⇧⌘/Ctrl Z', 'Undo · Redo'],
+  ];
+  showDialog('Mouse and keyboard', { html: `<div class="helpgrid">${rows.map(([k, v]) => `<kbd>${esc(k)}</kbd><span>${esc(v)}</span>`).join('')}</div>` });
+}
+$('helpBtn').addEventListener('click', showHelp);
+
 // ----- Inline popover for typed values (the viewer cannot use prompt()) -----
 function popover(pt, o) {
   const el = $('pop');
@@ -745,40 +830,51 @@ function labelFor(it, m) {
   const sh = shiftOf(it);
   return (it.session.params.annotations || []).filter((a) => a.kind === 'label' && a.ppm + sh <= m.ppmFrom + 1e-6 && a.ppm + sh >= m.ppmTo - 1e-6).map((a) => a.text).join('; ');
 }
-const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-const csv = (rows) => rows.map((r) => r.map(csvCell).join(',')).join('\n');
 const fileBase = (it) => (it.ds.title || it.ds.name || 'spectrum').replace(/[^\w.-]+/g, '_').slice(0, 60);
 
-function exportAs(kind) {
+// SVG of what is on screen, at print size.
+function currentSVG(it, w = 1600, h = 800) {
+  return NMR.plotSVG(it.result, { hi: viewer.view.hi, lo: viewer.view.lo, width: w, height: h, labels: viewer.showLabels, integrals: viewer.showCurves });
+}
+const svgURL = (svg) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+
+async function exportAs(kind) {
   const it = cur(); if (!it) return toast('Open a spectrum first');
   $('exportMenu').hidden = true;
-  const freq = it.ds.frequency || 0;
   if (kind === 'png') {
-    viewer.hoverX = undefined; viewer.draw();
-    const url = $('plot').toDataURL('image/png');
-    return showDialog('Plot image', { img: url, name: fileBase(it) + '.png' });
+    // Rasterise the vector plot at 2× so the PNG is sharp in slides and papers.
+    const img = new Image();
+    img.src = svgURL(currentSVG(it));
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.width * 2; c.height = img.height * 2;
+    const g = c.getContext('2d'); g.scale(2, 2); g.drawImage(img, 0, 0);
+    return showDialog('Plot as PNG (3200 × 1600)', { img: c.toDataURL('image/png'), name: fileBase(it) + '.png' });
   }
-  if (kind === 'peaks') {
-    const peaks = it.result.analysis.peaks;
-    const maxH = Math.max(...peaks.map((p) => p.height), 1);
-    const rows = [['ppm', 'Hz', 'height', 'relative %', 'picked']].concat(peaks.map((p) => [p.ppm.toFixed(4), freq ? (p.ppm * freq).toFixed(2) : '', p.height.toPrecision(6), (100 * p.height / maxH).toFixed(2), p.manual ? 'manual' : 'auto']));
-    return showDialog(`Peak list · ${peaks.length} peaks`, { text: csv(rows), name: fileBase(it) + '-peaks.csv', type: 'text/csv' });
-  }
-  if (kind === 'ints') {
-    const sigs = it.result.analysis.multiplets.filter((m) => !m.excluded && (!m.minor || m.manual || m.reference || is13C(it)));
-    const rows = [['from ppm', 'to ppm', 'centre ppm', 'multiplicity', 'J (Hz)', 'integral', 'label', 'environment']].concat(sigs.map((m) => [m.ppmFrom.toFixed(3), m.ppmTo.toFixed(3), m.ppm.toFixed(3), m.multiplicity || '', (m.J || []).map((j) => j.toFixed(1)).join(' '), is13C(it) ? '' : (m.nH || 0).toFixed(3), labelFor(it, m), m.candidates && m.candidates[0] ? m.candidates[0].group.name : '']));
-    const notes = (it.session.params.annotations || []).filter((a) => a.kind === 'note');
-    let text = csv(rows);
-    if (notes.length) text += '\n\n' + csv([['note at ppm', 'text']].concat(notes.map((a) => [(a.ppm + shiftOf(it)).toFixed(3), a.text])));
-    return showDialog(`Integrals · ${sigs.length} signals`, { text, name: fileBase(it) + '-integrals.csv', type: 'text/csv' });
-  }
-  showDialog('Report', { text: it.result.report, name: fileBase(it) + '-report.txt', type: 'text/plain' });
+  const e = NMR.EXPORTS.find((x) => x.id === kind);
+  const text = kind === 'svg' ? currentSVG(it) : NMR.exportAs(it.result, kind);
+  showDialog(e.label, { text, preview: kind === 'svg' ? svgURL(text) : null, name: fileBase(it) + e.suffix, type: e.type });
 }
+
+function buildExportMenu() {
+  const groups = {};
+  for (const e of NMR.EXPORTS) (groups[e.group] = groups[e.group] || []).push(e);
+  $('exportMenu').innerHTML = Object.entries(groups).map(([g, list]) => `<div class="mhead">${esc(g)}</div>` +
+    (g === 'Image' ? '<button data-ex="png" type="button">Plot as PNG (high resolution)</button>' : '') +
+    list.map((e) => `<button data-ex="${e.id}" type="button">${esc(e.label)}</button>`).join('')).join('') +
+    '<div class="mnote">JCAMP-DX, CSV and nmrML open in MestReNova, TopSpin, ACD/Labs, Origin and Excel.</div>';
+}
+buildExportMenu();
 
 function showDialog(title, o) {
   $('dlgTitle').textContent = title;
-  $('dlgBody').innerHTML = o.img ? `<img id="dlgImg" src="${o.img}" alt="Spectrum plot">` : `<textarea id="dlgText" spellcheck="false" aria-label="${esc(title)}"></textarea>`;
-  if (!o.img) $('dlgText').value = o.text;
+  $('dlgCopy').hidden = $('dlgSave').hidden = !!o.html;
+  if (o.html) { $('dlgBody').innerHTML = o.html; $('dlg').hidden = false; return; }
+  const big = !o.img && o.text.length > 200000;
+  $('dlgBody').innerHTML = o.img ? `<img id="dlgImg" src="${o.img}" alt="Spectrum plot">`
+    : `${o.preview ? `<img src="${o.preview}" alt="Spectrum plot">` : ''}<textarea id="dlgText" spellcheck="false" aria-label="${esc(title)}" ${o.preview ? 'style="min-height:90px"' : ''}></textarea>
+       <p class="assign alt">${esc(o.name)} · ${(o.text.length / 1024).toFixed(0)} kB${big ? ' · preview shows the start; Copy and Download take the whole file' : ''}</p>`;
+  if (!o.img) $('dlgText').value = big ? o.text.slice(0, 20000) + '\n…' : o.text;
   $('dlg').hidden = false;
   const done = (m) => toast(m);
   $('dlgCopy').onclick = async () => {
@@ -790,7 +886,7 @@ function showDialog(title, o) {
       done('Copied');
     } catch (e) {
       if (o.img) done('Right-click the image to copy or save it');
-      else { $('dlgText').select(); done('Press ⌘C / Ctrl+C to copy'); }
+      else { $('dlgText').value = o.text; $('dlgText').select(); done('Press ⌘C / Ctrl+C to copy'); }
     }
   };
   $('dlgSave').onclick = () => {
@@ -821,7 +917,8 @@ document.addEventListener('keydown', (e) => {
   if ((e.metaKey || e.ctrlKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if ((e.metaKey || e.ctrlKey) && k === 'y') { e.preventDefault(); redo(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  if (k === 'escape') { closePop(); $('exportMenu').hidden = true; $('dlg').hidden = true; setMode('zoom'); return; }
+  if (k === '?') { showHelp(); return; }
+  if (k === 'escape') { $('ctxMenu').hidden = true; closePop(); $('exportMenu').hidden = true; $('dlg').hidden = true; setMode('zoom'); return; }
   if (k === 'f') { viewer.reset(); return; }
   if (KEYS[k]) setMode(KEYS[k]);
 });

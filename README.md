@@ -32,6 +32,15 @@ shortcuts are web-only; on the Mac, undo and redo are ⌘Z and ⇧⌘Z. In the P
 panel, "pick on spectrum" chooses the counting and end-group signals by clicking or dragging on
 the plot.
 
+Mouse: scroll to zoom around the pointer, Shift/⌥-scroll for the vertical scale, swipe sideways
+or Shift-drag to pan, double-click to fit, right-click a signal for a menu (zoom to it, mark or
+remove peaks, set its integral, label it, reference it, use it for the polymer calculation, copy
+it for a report), and hover a signal to see δ, multiplicity, J, integral and label.
+
+Export for other software: the spectrum as JCAMP-DX (MestReNova, TopSpin, ACD/Labs), CSV/TSV
+(Origin, Excel, any plotting tool) or nmrML; the plot as SVG, high-resolution PNG or (Mac) PDF;
+peak and integral tables as CSV or TSV that paste straight into Excel.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the design.
 
 ## Web trial

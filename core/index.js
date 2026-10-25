@@ -11,3 +11,4 @@ export { analyse, pickPeaks, findMultiplets, integrateRange, describeMultiplet, 
 export { suggest, candidateGroups, journalReport, formulaInfo, matchCompounds, fragmentHints } from './assign.js';
 export { SHIFT_GROUPS, ELEMENTS, SOLVENTS, IMPURITIES, COUPLINGS, COMPOUNDS, searchReference, findSolvent } from './database.js';
 export { POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea } from './polymer.js';
+export { EXPORTS, exportAs, plotSVG, toJcamp, toNmrML, spectrumXY, peakTable, integralTable } from './export.js';

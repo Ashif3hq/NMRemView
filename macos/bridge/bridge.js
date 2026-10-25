@@ -3,7 +3,7 @@
 import {
   loadExpanded, createSession, searchReference, SOLVENTS, IMPURITIES, COUPLINGS,
   POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea,
-  snapToPeak, findSolvent,
+  snapToPeak, findSolvent, EXPORTS, exportAs,
 } from '../../core/index.js';
 
 const sessions = new Map();
@@ -138,26 +138,14 @@ globalThis.NMRBridge = {
     const best = refs.reduce((b, v) => (Math.abs(v - ppm) < Math.abs(b - ppm) ? v : b), refs[0]);
     return Math.abs(best - ppm) < (is13 ? 3 : 0.3) ? best : Math.round(ppm * 1000) / 1000;
   },
-  // CSV and text exports: kind is 'peaks', 'ints' or 'report'.
-  exportText(id, kind) {
+  // Export formats for menus: [{ id, label, suffix, type, group }].
+  exportList() { return JSON.stringify(EXPORTS); },
+  // Any export from core/export.js; hi/lo (optional) give the plotted range for SVG.
+  exportText(id, kind, hi, lo) {
     const r = lastResults.get(id); if (!r) return '';
-    const s = r.spectrum, freq = s.frequency || 0, is13 = /13C/.test(s.nucleus), sh = r.params.referenceShift;
-    const cell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-    const csv = (rows) => rows.map((row) => row.map(cell).join(',')).join('\n');
-    if (kind === 'peaks') {
-      const maxH = Math.max(...r.analysis.peaks.map((p) => p.height), 1);
-      return csv([['ppm', 'Hz', 'height', 'relative %', 'picked']].concat(r.analysis.peaks.map((p) => [p.ppm.toFixed(4), freq ? (p.ppm * freq).toFixed(2) : '', p.height.toPrecision(6), (100 * p.height / maxH).toFixed(2), p.manual ? 'manual' : 'auto'])));
-    }
-    if (kind === 'ints') {
-      const ann = r.params.annotations || [];
-      const label = (m) => ann.filter((a) => a.kind === 'label' && a.ppm + sh <= m.ppmFrom + 1e-6 && a.ppm + sh >= m.ppmTo - 1e-6).map((a) => a.text).join('; ');
-      const sigs = r.analysis.multiplets.filter((m) => !m.excluded && (!m.minor || m.manual || m.reference || is13));
-      let out = csv([['from ppm', 'to ppm', 'centre ppm', 'multiplicity', 'J (Hz)', 'integral', 'label', 'environment']].concat(sigs.map((m) => [m.ppmFrom.toFixed(3), m.ppmTo.toFixed(3), m.ppm.toFixed(3), m.multiplicity || '', (m.J || []).map((j) => j.toFixed(1)).join(' '), is13 ? '' : (m.nH || 0).toFixed(3), label(m), m.candidates && m.candidates[0] ? m.candidates[0].group.name : ''])));
-      const notes = ann.filter((a) => a.kind === 'note');
-      if (notes.length) out += '\n\n' + csv([['note at ppm', 'text']].concat(notes.map((a) => [(a.ppm + sh).toFixed(3), a.text])));
-      return out;
-    }
-    return r.report;
+    const alias = { peaks: 'peaks-csv', ints: 'ints-csv' };
+    const opts = typeof hi === 'number' && typeof lo === 'number' && hi > lo ? { hi, lo } : {};
+    return exportAs(r, alias[kind] || kind, opts);
   },
   search(query) {
     const r = searchReference(query);

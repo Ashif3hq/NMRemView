@@ -47,6 +47,22 @@ for (const c of cases) {
   console.log(ok ? 'ok  ' : 'FAIL', 'manual peak add / remove', ok ? '' : JSON.stringify({ gone, added, moved }));
   if (!ok) fail++;
 }
+// Exports read back through our own readers give the same peaks.
+{
+  const { datasets } = await N.loadFiles(new Map([['ibuprofen-1h.zip', new Uint8Array(fs.readFileSync('web/samples/ibuprofen-1h.zip'))]]));
+  const r = N.createSession(datasets[0]).run();
+  const top = (x) => x.analysis.peaks.slice(0, 8).map((p) => p.ppm.toFixed(3)).join(' ');
+  const bad = [];
+  for (const [id, name] of [['jcamp', 'x.jdx'], ['nmrml', 'x.nmrML'], ['xy-csv', 'x.csv'], ['xy-tsv', 'x.txt']]) {
+    const back = await N.loadFiles(new Map([[name, new TextEncoder().encode(N.exportAs(r, id))]]));
+    if (!back.datasets.length || top(N.createSession(back.datasets[0]).run()) !== top(r)) bad.push(id);
+  }
+  const svg = N.plotSVG(r);
+  if (!svg.startsWith('<?xml') || !svg.includes('<polyline')) bad.push('svg');
+  for (const e of N.EXPORTS) if (!N.exportAs(r, e.id).length) bad.push(e.id);
+  console.log(bad.length ? 'FAIL' : 'ok  ', 'exports round-trip', bad.join(' '));
+  if (bad.length) fail++;
+}
 // Private documents (not in git): every .mnova in tests/private must yield spectra.
 const priv = new URL('./private/', import.meta.url);
 if (fs.existsSync(priv)) for (const f of fs.readdirSync(priv).filter((x) => /\.mnova$/i.test(x))) {

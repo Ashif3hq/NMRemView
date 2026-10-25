@@ -15,6 +15,14 @@ struct SpectrumView: View {
     var onRange: ((Double, Double) -> Void)? = nil
     /// ppm, point in the view, vertical position as a fraction of the plot, plot width, ppm per point, index of a label or note hit.
     var onClick: ((Double, CGPoint, Double, CGFloat, Double, Int?) -> Void)? = nil
+    /// Runs a tool at a point from the right-click menu (same arguments as onClick, tool first).
+    var onMenu: ((Tool, Double, CGPoint, Double, CGFloat, Double, Int?) -> Void)? = nil
+    /// Right-click "use as polymer repeat-unit (true) / end-group (false) signal".
+    var onPolymerPick: ((Signal, Bool) -> Void)? = nil
+    var labelText: ((Signal) -> String)? = nil
+
+    @StateObject private var mouse = PlotMouse()
+    @State private var hover: CGPoint?
 
     @State private var dragStart: CGFloat?
     @State private var dragNow: CGFloat?
@@ -34,12 +42,16 @@ struct SpectrumView: View {
     var body: some View {
         GeometryReader { geo in
             let range = view ?? fullRange
+            let binding = $view
+            let _ = mouse.sync(size: geo.size, range: range,
+                               bounds: min(result.ppmStart, result.ppmEnd)...max(result.ppmStart, result.ppmEnd),
+                               set: { binding.wrappedValue = $0 })
             Canvas { ctx, size in draw(ctx: ctx, size: size, range: range) }
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { v in
-                            if tool == .pan {
+                            if tool == .pan || NSEvent.modifierFlags.contains(.shift) {
                                 if panFrom == nil { panFrom = range }
                                 pan(by: v.translation.width, width: geo.size.width)
                             } else if abs(v.translation.width) > 3 {
@@ -54,17 +66,126 @@ struct SpectrumView: View {
                             .frame(width: abs(n - s)).offset(x: min(s, n))
                     }
                 }
+                .overlay(alignment: .topLeading) { tooltip(size: geo.size, range: range) }
+                .overlay(alignment: .topTrailing) {
+                    if let h = hover {
+                        Text(readout(ppm(at: h.x, width: geo.size.width, range: range)))
+                            .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.background.opacity(0.8), in: RoundedRectangle(cornerRadius: 4))
+                            .padding(8).allowsHitTesting(false)
+                    }
+                }
                 .onHover { inside in
                     if inside { cursor.push() } else { NSCursor.pop() }
                 }
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let p): hover = p; mouse.inside = true; mouse.location = p
+                    case .ended: hover = nil; mouse.inside = false
+                    }
+                }
+                .contextMenu { contextItems(size: geo.size, range: range) }
         }
-        .onChange(of: result.id) { view = nil }
+        .onAppear { mouse.start() }
+        .onDisappear { mouse.stop() }
+        .onChange(of: result.id) { view = nil; mouse.yScale = 1 }
         .onChange(of: highlight) {
             if let h = highlight {
                 let w = max(h.ppmFrom - h.ppmTo, result.is13C ? 1 : 0.05)
                 view = (h.ppmTo - w)...(h.ppmFrom + w)
             }
         }
+    }
+
+    private func readout(_ ppm: Double) -> String {
+        String(format: result.is13C ? "δ %.2f ppm" : "δ %.3f ppm", ppm) + (result.frequency > 0 ? String(format: " · %.1f Hz", ppm * result.frequency) : "")
+    }
+
+    private func signal(at ppm: Double) -> Signal? {
+        result.signals.first { !$0.excluded && ppm <= $0.ppmFrom && ppm >= $0.ppmTo }
+    }
+
+    private func signalText(_ s: Signal) -> String {
+        let shift = !result.is13C && s.multiplicity == "m" ? String(format: "%.2f–%.2f", s.ppmFrom, s.ppmTo) : String(format: result.is13C ? "%.1f" : "%.2f", s.ppm)
+        if result.is13C { return "δ " + shift }
+        let j = s.J.isEmpty ? "" : ", J = " + s.J.map { String(format: "%.1f", $0) }.joined(separator: ", ") + " Hz"
+        return "δ \(shift) (\(s.multiplicity)\(j), \(Int(s.nH.rounded()))H)"
+    }
+
+    /// What the signal under the pointer is.
+    @ViewBuilder private func tooltip(size: CGSize, range: ClosedRange<Double>) -> some View {
+        if let h = hover, dragStart == nil, h.y > 60, h.y < size.height - 56, let s = signal(at: ppm(at: h.x, width: size.width, range: range)) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(String(format: result.is13C ? "δ %.1f" : "δ %.2f", s.ppm)).bold().monospacedDigit()
+                    if !result.is13C {
+                        Text("· \(s.multiplicity)" + (s.J.isEmpty ? "" : ", J " + s.J.map { String(format: "%.1f", $0) }.joined(separator: ", ")))
+                        Text(String(format: "· %.2fH", s.nH)).bold().monospacedDigit()
+                    }
+                }
+                if let lab = labelText?(s), !lab.isEmpty { Text(lab).foregroundStyle(.purple).fontWeight(.semibold) }
+                if let c = s.candidates.first { Text(c).foregroundStyle(.secondary) }
+                if let f = s.flag { Text(f).foregroundStyle(.orange) }
+            }
+            .font(.caption)
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+            .fixedSize()
+            .offset(x: h.x + 260 < size.width ? h.x + 14 : max(4, h.x - 250), y: min(h.y + 14, size.height - 90))
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Right-click menu for the point under the pointer.
+    @ViewBuilder private func contextItems(size: CGSize, range: ClosedRange<Double>) -> some View {
+        let p = hover ?? CGPoint(x: size.width / 2, y: size.height / 2)
+        let ppmHere = ppm(at: p.x, width: size.width, range: range)
+        let g = Geo(size: size, range: range, view: self)
+        let hit = annotationBoxes(g).first { $0.rect.insetBy(dx: -4, dy: -4).contains(p) }?.index
+        let yFrac = Double((p.y - g.top) / (g.axisY - g.top))
+        let perPt = (range.upperBound - range.lowerBound) / Double(size.width - 2 * margin)
+        let run = { (t: Tool) in onMenu?(t, ppmHere, p, yFrac, size.width, perPt, hit) }
+        let sig = signal(at: ppmHere)
+        if hit != nil { Button("Edit label or note…") { run(.zoom) }; Divider() }
+        if let s = sig {
+            Button("Zoom to this signal") {
+                let w = max(s.ppmFrom - s.ppmTo, result.is13C ? 1 : 0.05)
+                view = (s.ppmTo - w * 1.2)...(s.ppmFrom + w * 1.2)
+            }
+        }
+        Button("Zoom out") { zoomOut(range) }
+        Button("Fit whole spectrum") { view = nil; mouse.yScale = 1 }
+        Divider()
+        Button("Mark peak here") { run(.peakAdd) }
+        Button("Remove nearest peak") { run(.peakDel) }
+        if sig != nil && !result.is13C { Button("Set this integral to…") { run(.setIntegral) } }
+        Button(sig != nil ? "Label this signal…" : "Label here…") { run(.label) }
+        Button("Add note here…") { run(.note) }
+        Button("Reference this peak…") { run(.reference) }
+        if let s = sig, !result.is13C {
+            Divider()
+            Button("Use as polymer repeat-unit signal") { onPolymerPick?(s, true) }
+            Button("Use as polymer end-group signal") { onPolymerPick?(s, false) }
+        }
+        Divider()
+        Button(String(format: result.is13C ? "Copy δ %.2f" : "Copy δ %.3f", ppmHere)) {
+            copy(String(format: result.is13C ? "%.2f" : "%.3f", ppmHere))
+        }
+        if let s = sig { Button("Copy this signal for a report") { copy(signalText(s)) } }
+    }
+
+    private func copy(_ t: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(t, forType: .string)
+    }
+
+    private func zoomOut(_ r: ClosedRange<Double>) {
+        let lo = min(result.ppmStart, result.ppmEnd), hi = max(result.ppmStart, result.ppmEnd)
+        let c = (r.lowerBound + r.upperBound) / 2, w = r.upperBound - r.lowerBound
+        let a = max(lo, c - w), b = min(hi, c + w)
+        view = (a <= lo && b >= hi) ? nil : a...b
     }
 
     private var cursor: NSCursor {
@@ -89,7 +210,7 @@ struct SpectrumView: View {
 
     private func end(_ v: DragGesture.Value, size: CGSize, range: ClosedRange<Double>) {
         defer { dragStart = nil; dragNow = nil; panFrom = nil }
-        if tool == .pan && abs(v.translation.width) > 3 { return }
+        if (tool == .pan || panFrom != nil) && abs(v.translation.width) > 3 { return }
         let W = size.width
         if abs(v.translation.width) > 4 {
             let a = ppm(at: v.startLocation.x, width: W, range: range), b = ppm(at: v.location.x, width: W, range: range)
@@ -123,6 +244,7 @@ struct SpectrumView: View {
         let vmax: Double
         let result: SpectrumResult
         init(size: CGSize, range: ClosedRange<Double>, view: SpectrumView) {
+            let yScale = view.mouse.yScale
             W = size.width; top = 70; axisY = size.height - 56
             self.range = range
             result = view.result
@@ -130,7 +252,7 @@ struct SpectrumView: View {
             pairs = n
             var m = 1e-12
             for c in 0..<n where range.contains(Geo.colPpm(c, view.result, n)) { m = max(m, view.result.y[2 * c + 1]) }
-            vmax = m
+            vmax = m / max(0.2, yScale)
         }
         static func colPpm(_ c: Int, _ r: SpectrumResult, _ pairs: Int) -> Double {
             r.ppmStart + (r.ppmEnd - r.ppmStart) * Double(c) / Double(max(1, pairs - 1))
@@ -284,5 +406,60 @@ struct SpectrumView: View {
             ctx.stroke(box, with: .color(.purple), lineWidth: 1)
             ctx.draw(Text(b.a.text).font(.system(size: 11, weight: .semibold)).foregroundColor(.purple), at: CGPoint(x: b.rect.minX + 6, y: b.rect.midY), anchor: .leading)
         }
+    }
+}
+
+/// Scroll-wheel and trackpad handling for the plot. SwiftUI on macOS 14 has no scroll-wheel
+/// modifier, so a local event monitor handles wheel events while the pointer is over the plot.
+final class PlotMouse: ObservableObject {
+    @Published var yScale: Double = 1
+    var inside = false
+    var location: CGPoint = .zero
+    private var size: CGSize = .zero
+    private var range: ClosedRange<Double> = 0...1
+    private var bounds: ClosedRange<Double> = 0...1
+    private var setRange: (ClosedRange<Double>?) -> Void = { _ in }
+    private var monitor: Any?
+    private let margin: CGFloat = 12
+
+    func sync(size: CGSize, range: ClosedRange<Double>, bounds: ClosedRange<Double>, set: @escaping (ClosedRange<Double>?) -> Void) {
+        self.size = size; self.range = range; self.bounds = bounds; setRange = set
+    }
+
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] e in
+            (self?.scroll(e) ?? false) ? nil : e
+        }
+    }
+
+    func stop() {
+        if let m = monitor { NSEvent.removeMonitor(m) }
+        monitor = nil
+    }
+
+    private func scroll(_ e: NSEvent) -> Bool {
+        guard inside, size.width > 2 * margin + 10 else { return false }
+        let precise = e.hasPreciseScrollingDeltas
+        let dx = Double(e.scrollingDeltaX), dy = Double(e.scrollingDeltaY)
+        let span = range.upperBound - range.lowerBound
+        if e.modifierFlags.contains(.shift) || e.modifierFlags.contains(.option) {
+            // Shift or Option + wheel: vertical scale. (Shift turns a mouse wheel into dx.)
+            let d = dy != 0 ? dy : dx
+            yScale = min(500, max(0.2, yScale * exp(d * (precise ? 0.01 : 0.1))))
+        } else if abs(dx) > abs(dy) {
+            // Sideways swipe: pan.
+            var d = dx / Double(size.width - 2 * margin) * span
+            d = min(bounds.upperBound - range.upperBound, max(bounds.lowerBound - range.lowerBound, d))
+            setRange((range.lowerBound + d)...(range.upperBound + d))
+        } else if dy != 0 {
+            // Wheel or two-finger scroll: zoom around the pointer.
+            let p = range.upperBound - Double((location.x - margin) / (size.width - 2 * margin)) * span
+            let f = exp(-dy * (precise ? 0.01 : 0.08))
+            let hi = min(bounds.upperBound, p + (range.upperBound - p) * f)
+            let lo = max(bounds.lowerBound, p - (p - range.lowerBound) * f)
+            if hi - lo > 1e-4 { setRange(lo...hi) }
+        }
+        return true
     }
 }

@@ -42,7 +42,7 @@ struct ContentView: View {
             if let r = store.current {
                 HSplitView {
                     VStack(spacing: 0) {
-                        ToolBarRow(result: r, range: $plotRange, exportPlot: { exportPNG(r) })
+                        ToolBarRow(result: r, range: $plotRange, exportPlot: { exportPNG(r) }, exportPDF: { exportPDF(r) })
                         Divider()
                         ProcessingBar(result: r)
                         Divider()
@@ -111,7 +111,10 @@ extension ContentView {
         SpectrumView(result: r, bands: bands.filter { ($0.nucleus == "13C") == r.is13C }, overlay: overlay, highlight: highlight,
                      tool: store.tool, marks: tab == .polymer ? store.plotMarks : [], view: range ?? $plotRange,
                      onRange: { a, b in store.handleRange(a, b) },
-                     onClick: { ppm, pt, yFrac, w, perPt, hit in store.handleClick(ppm: ppm, point: pt, yFrac: yFrac, hit: hit, plotWidth: w, ppmPerPoint: perPt) })
+                     onClick: { ppm, pt, yFrac, w, perPt, hit in store.handleClick(ppm: ppm, point: pt, yFrac: yFrac, hit: hit, plotWidth: w, ppmPerPoint: perPt) },
+                     onMenu: { t, ppm, pt, yFrac, w, perPt, hit in store.handleClick(ppm: ppm, point: pt, yFrac: yFrac, hit: hit, plotWidth: w, ppmPerPoint: perPt, using: t) },
+                     onPolymerPick: { s, rep in store.finishPick(s, repeatUnit: rep) },
+                     labelText: { store.labels(for: $0) })
     }
 
     /// Renders the current view of the plot at print size and saves it as PNG.
@@ -127,6 +130,27 @@ extension ContentView {
             store.errorMessage = "Could not render the plot"; return
         }
         store.save(png, name: store.fileBase + ".png", type: .png)
+    }
+
+    /// Same view as a vector PDF page.
+    @MainActor private func exportPDF(_ r: SpectrumResult) {
+        let content = plot(r, range: .constant(plotRange))
+            .frame(width: 1200, height: 600)
+            .background(Color.white)
+            .environment(\.colorScheme, .light)
+        let renderer = ImageRenderer(content: content)
+        let data = NSMutableData()
+        renderer.render { size, draw in
+            var box = CGRect(origin: .zero, size: size)
+            guard let consumer = CGDataConsumer(data: data as CFMutableData),
+                  let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else { return }
+            ctx.beginPDFPage(nil)
+            draw(ctx)
+            ctx.endPDFPage()
+            ctx.closePDF()
+        }
+        guard data.length > 0 else { store.errorMessage = "Could not render the plot"; return }
+        store.save(data as Data, name: store.fileBase + ".pdf", type: .pdf)
     }
 }
 

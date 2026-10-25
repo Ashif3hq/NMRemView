@@ -42,8 +42,8 @@ enum Tool: String, CaseIterable, Identifiable {
 
     var hint: String {
         switch self {
-        case .zoom: return "Drag to zoom · double-click to fit"
-        case .pan: return "Drag left or right to move along the spectrum"
+        case .zoom: return "Scroll to zoom · drag to zoom to a region · shift-drag to pan · double-click to fit · right-click for more"
+        case .pan: return "Drag left or right to move along the spectrum · scroll to zoom · shift-scroll for intensity"
         case .peakAdd: return "Click a peak to mark it (snaps to the top) · drag over a region to mark its tallest point"
         case .peakDel: return "Click near a peak to remove it · drag over a region to remove every peak in it"
         case .integrate: return "Drag across a signal to add an integral region"
@@ -129,6 +129,7 @@ struct ToolBarRow: View {
     let result: SpectrumResult
     @Binding var range: ClosedRange<Double>?
     var exportPlot: () -> Void
+    var exportPDF: () -> Void
 
     var body: some View {
         HStack(spacing: 4) {
@@ -148,15 +149,24 @@ struct ToolBarRow: View {
             Button { store.undo() } label: { Image(systemName: "arrow.uturn.backward") }.disabled(!store.canUndo).help("Undo (⌘Z)")
             Button { store.redo() } label: { Image(systemName: "arrow.uturn.forward") }.disabled(!store.canRedo).help("Redo (⇧⌘Z)")
             Menu {
-                Button("Plot as PNG…", action: exportPlot)
-                Button("Peak list (CSV)…") { save("peaks", "-peaks.csv", .commaSeparatedText) }
-                Button("Integrals and labels (CSV)…") { save("ints", "-integrals.csv", .commaSeparatedText) }
-                Divider()
-                Button("Copy peak list") { store.copy(store.exportText("peaks")) }
-                Button("Copy integrals") { store.copy(store.exportText("ints")) }
-                Button("Copy report") { store.copy(store.exportText("report")) }
+                Section("Image") {
+                    Button("Plot as PNG (high resolution)…", action: exportPlot)
+                    Button("Plot as PDF (vector)…", action: exportPDF)
+                    ForEach(store.exportFormats.filter { $0.group == "Image" }) { f in Button(f.label + "…") { store.saveExport(f, range: range) } }
+                }
+                ForEach(["Spectrum", "Tables"], id: \.self) { g in
+                    Section(g) {
+                        ForEach(store.exportFormats.filter { $0.group == g }) { f in Button(f.label + "…") { store.saveExport(f, range: range) } }
+                    }
+                }
+                Section("Copy to clipboard") {
+                    Button("Copy peak list (pastes into Excel)") { store.copy(store.exportText("peaks-tsv")) }
+                    Button("Copy integrals (pastes into Excel)") { store.copy(store.exportText("ints-tsv")) }
+                    Button("Copy report") { store.copy(store.exportText("report")) }
+                }
             } label: { Label("Export", systemImage: "square.and.arrow.up") }
                 .fixedSize()
+                .help("JCAMP-DX, CSV/TSV and nmrML open in MestReNova, TopSpin, ACD/Labs, Origin and Excel; SVG and PDF in Illustrator, Word and PowerPoint")
             Spacer(minLength: 0)
         }
         .labelStyle(.titleAndIcon)

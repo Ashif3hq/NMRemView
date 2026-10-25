@@ -185,6 +185,14 @@ struct PolymerResult: Codable {
     let microstructure: Micro?
 }
 
+struct ExportFormat: Codable, Identifiable, Hashable {
+    let id: String
+    let label: String
+    let suffix: String
+    let type: String
+    let group: String
+}
+
 enum CoreError: LocalizedError {
     case missingBundle
     case script(String)
@@ -249,9 +257,13 @@ final class CoreBridge {
         Double(try call("suggestReference", [id, ppm])) ?? ppm
     }
 
-    /// kind: "peaks", "ints" or "report".
-    func exportText(id: String, kind: String) throws -> String {
-        try call("exportText", [id, kind])
+    func exportList() throws -> [ExportFormat] {
+        try decode(try call("exportList", []))
+    }
+
+    /// Any export from core/export.js (see ExportFormat.id); hi/lo set the plotted range for SVG.
+    func exportText(id: String, kind: String, range: ClosedRange<Double>? = nil) throws -> String {
+        try call("exportText", [id, kind, range.map { $0.upperBound as Any } ?? NSNull(), range.map { $0.lowerBound as Any } ?? NSNull()])
     }
 
     func search(_ query: String) throws -> SearchResult {

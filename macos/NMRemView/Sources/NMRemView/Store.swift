@@ -21,6 +21,7 @@ final class Store: ObservableObject {
     @Published private var redoStacks: [String: [[String: Any]]] = [:]
     private var pickSerial = 0
     private(set) lazy var polymerLibrary: PolymerLibrary? = try? core?.polymerLibrary()
+    private(set) lazy var exportFormats: [ExportFormat] = (try? core?.exportList()) ?? []
 
     private var core: CoreBridge?
 
@@ -193,6 +194,7 @@ final class Store: ObservableObject {
 
     /// A drag across the plot in a tool that selects a region.
     func handleRange(_ a: Double, _ b: Double) {
+        let tool = self.tool
         guard let core, let r = current, let id = selection else { return }
         let hi = max(a, b), lo = min(a, b)
         switch tool {
@@ -207,15 +209,16 @@ final class Store: ObservableObject {
             addIntegral(hi, lo)
             guard let now = current else { return }
             let s = now.signals.first { $0.manual && abs($0.ppmFrom - hi) < 1e-6 && abs($0.ppmTo - lo) < 1e-6 } ?? signal(at: (hi + lo) / 2, in: now)
-            finishPick(s)
+            finishPick(s, repeatUnit: tool == .pickRepeat)
         default:
             break
         }
     }
 
     /// A click on the plot. `hit` is the index of a label or note under the pointer.
-    func handleClick(ppm: Double, point: CGPoint, yFrac: Double, hit: Int?, plotWidth: CGFloat, ppmPerPoint: Double) {
+    func handleClick(ppm: Double, point: CGPoint, yFrac: Double, hit: Int?, plotWidth: CGFloat, ppmPerPoint: Double, using override: Tool? = nil) {
         guard let core, let r = current, let id = selection else { return }
+        let tool = override ?? self.tool
         let place = PromptRequest.Place(point: point, plotWidth: plotWidth)
         if let hit, [.zoom, .pan, .label, .note].contains(tool), hit < r.params.annotations.count {
             let a = r.params.annotations[hit]
@@ -261,7 +264,7 @@ final class Store: ObservableObject {
             prompt = PromptRequest(title: "Note", initial: "", numeric: false, place: place,
                 onOK: { [weak self] text in self?.addAnnotation(Annotation(ppm: ppm - sh, text: text, kind: "note", yFrac: min(0.95, max(0, yFrac)))) }, onDelete: nil)
         case .pickRepeat, .pickEnd:
-            finishPick(signal(at: ppm, in: r))
+            finishPick(signal(at: ppm, in: r), repeatUnit: tool == .pickRepeat)
         default:
             break
         }
@@ -275,18 +278,26 @@ final class Store: ObservableObject {
         edit(["annotations": (r.params.annotations + [a]).map(\.json)])
     }
 
-    private func finishPick(_ s: Signal?) {
+    func finishPick(_ s: Signal?, repeatUnit: Bool) {
         guard let s else { tool = .zoom; return }
         pickSerial += 1
-        polymerPick = PolymerPick(repeatUnit: tool == .pickRepeat, ppm: s.ppm, serial: pickSerial)
+        polymerPick = PolymerPick(repeatUnit: repeatUnit, ppm: s.ppm, serial: pickSerial)
         tool = .zoom
     }
 
     // MARK: Export
 
-    func exportText(_ kind: String) -> String {
+    func exportText(_ kind: String, range: ClosedRange<Double>? = nil) -> String {
         guard let core, let id = selection else { return "" }
-        return (try? core.exportText(id: id, kind: kind)) ?? ""
+        do { return try core.exportText(id: id, kind: kind, range: range) }
+        catch { errorMessage = error.localizedDescription; return "" }
+    }
+
+    func saveExport(_ f: ExportFormat, range: ClosedRange<Double>?) {
+        let text = exportText(f.id, range: range)
+        guard !text.isEmpty else { return }
+        let ext = f.suffix.split(separator: ".").last.map(String.init) ?? "txt"
+        save(Data(text.utf8), name: fileBase + f.suffix, type: UTType(filenameExtension: ext) ?? .data)
     }
 
     func copy(_ text: String) {

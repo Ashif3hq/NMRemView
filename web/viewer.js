@@ -8,6 +8,7 @@ export class SpectrumViewer {
     this.onHover = opts.onHover || (() => {});
     this.onRange = opts.onRange || (() => {});
     this.onClickPpm = opts.onClickPpm || (() => {});
+    this.onContext = opts.onContext || (() => {});
     this.mode = 'zoom';
     this.result = null;
     this.bands = [];
@@ -348,8 +349,14 @@ export class SpectrumViewer {
   _bind() {
     const c = this.canvas;
     const pt = (e) => { const r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-    c.addEventListener('pointerdown', (e) => {
+    c.addEventListener('contextmenu', (e) => {
       if (!this.result) return;
+      e.preventDefault();
+      const p = pt(e), L = this._L || this.layout();
+      this.onContext(this.ppmOf(p.x, L), { x: p.x, y: p.y, yFrac: (p.y - L.top) / (L.axisY - L.top) });
+    });
+    c.addEventListener('pointerdown', (e) => {
+      if (!this.result || e.button === 2) return;
       c.setPointerCapture(e.pointerId);
       const p = pt(e);
       this.drag = { x1: p.x, y1: p.y, pan: e.button === 1 || e.shiftKey || this.mode === 'pan', view: { ...this.view } };
@@ -360,7 +367,7 @@ export class SpectrumViewer {
       const p = pt(e);
       const L = this._L || this.layout();
       this.hoverX = p.x;
-      this.onHover(this.ppmOf(p.x, L));
+      this.onHover(this.ppmOf(p.x, L), { x: p.x, y: p.y, dragging: !!this.drag, inPlot: p.y >= L.top - 10 && p.y <= L.axisY });
       if (this.drag) {
         if (this.drag.pan) {
           const d = ((p.x - this.drag.x1) / (L.right - L.left)) * (this.drag.view.hi - this.drag.view.lo);
@@ -394,15 +401,23 @@ export class SpectrumViewer {
     c.addEventListener('wheel', (e) => {
       if (!this.result) return;
       e.preventDefault();
-      if (e.ctrlKey || e.metaKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        // Horizontal zoom around the cursor (pinch on trackpads arrives as ctrl+wheel).
-        const L = this._L || this.layout();
-        const p = this.ppmOf(pt(e).x, L);
-        const f = Math.exp((e.deltaY || e.deltaX) * 0.01);
-        const s = this.result.spectrum;
-        this.view = { hi: Math.min(s.ppmStart, p + (this.view.hi - p) * f), lo: Math.max(s.ppmEnd, p - (p - this.view.lo) * f) };
+      const L = this._L || this.layout();
+      const s = this.result.spectrum;
+      const span = this.view.hi - this.view.lo;
+      if (e.shiftKey || e.altKey) {
+        // Shift or Option + wheel: vertical scale.
+        const d = e.deltaY || e.deltaX;
+        this.yScale = Math.min(500, Math.max(0.2, this.yScale * Math.exp(-d * 0.002)));
+      } else if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        // Sideways swipe on a trackpad or tilt wheel: pan.
+        let d = (e.deltaX / (L.right - L.left)) * span;
+        d = Math.max(-(s.ppmStart - this.view.hi), Math.min(d, this.view.lo - s.ppmEnd));
+        this.view = { hi: this.view.hi - d, lo: this.view.lo - d };
       } else {
-        this.yScale = Math.min(500, Math.max(0.2, this.yScale * Math.exp(-e.deltaY * 0.002)));
+        // Wheel or pinch: zoom around the pointer.
+        const p = this.ppmOf(pt(e).x, L);
+        const f = Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
+        this.view = { hi: Math.min(s.ppmStart, p + (this.view.hi - p) * f), lo: Math.max(s.ppmEnd, p - (p - this.view.lo) * f) };
       }
       this.draw();
     }, { passive: false });

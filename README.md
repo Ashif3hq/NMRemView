@@ -24,10 +24,11 @@ integral to it, delete single regions. The Polymer panel turns integrals into po
 DPₙ and Mₙ by end-group analysis (repeat-unit and end-group presets), copolymer mole and weight
 fractions, and polyisoprene / polymyrcene / polybutadiene microstructure (1,4 / 3,4 / 1,2, cis : trans).
 
-The web trial has a MestReNova-style toolbar (keyboard shortcut in brackets): Zoom (Z), Pan (H),
+The web trial and the macOS app have a MestReNova-style toolbar (keyboard shortcut in brackets): Zoom (Z), Pan (H),
 Peak + (K) and Peak − (X) for manual peak picking, Integrate (I), ∫ = n (N) to set a reference
 integral, δ ref (R) to reference the shift, Label (L) to name a signal, Note (T) for free text on
-the plot, undo/redo (Ctrl/⌘ Z), and Export to PNG, peak-list CSV and integral CSV. In the Polymer
+the plot, undo/redo (Ctrl/⌘ Z), and Export to PNG, peak-list CSV and integral CSV. The letter
+shortcuts are web-only; on the Mac, undo and redo are ⌘Z and ⇧⌘Z. In the Polymer
 panel, "pick on spectrum" chooses the counting and end-group signals by clicking or dragging on
 the plot.
 

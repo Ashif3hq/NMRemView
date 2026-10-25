@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var overlay: CompoundMatch?
     @State private var highlight: Signal?
     @State private var dropTargeted = false
+    @State private var plotRange: ClosedRange<Double>?
 
     enum Tab: String, CaseIterable { case signals = "Signals", suggestions = "Suggestions", polymer = "Polymer", lookup = "Lookup" }
 
@@ -41,12 +42,23 @@ struct ContentView: View {
             if let r = store.current {
                 HSplitView {
                     VStack(spacing: 0) {
+                        ToolBarRow(result: r, range: $plotRange, exportPlot: { exportPNG(r) })
+                        Divider()
                         ProcessingBar(result: r)
                         Divider()
-                        SpectrumView(result: r, bands: bands.filter { ($0.nucleus == "13C") == r.is13C }, overlay: overlay, highlight: highlight,
-                                     integrateMode: store.integrateMode && !r.is13C,
-                                     onIntegrate: { a, b in store.addIntegral(a, b) })
+                        plot(r)
                             .frame(minWidth: 560, minHeight: 380)
+                            .overlay(alignment: .topLeading) {
+                                if let p = store.prompt {
+                                    PromptBox(request: p)
+                                        .id(p.id)
+                                        .offset(x: max(8, min(p.place.point.x - 20, p.place.plotWidth - 400)), y: p.place.point.y + 12)
+                                }
+                            }
+                            .overlay(alignment: .bottomLeading) {
+                                Text(store.tool.hint).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 2)
+                                    .allowsHitTesting(false)
+                            }
                         Divider()
                         HStack(alignment: .top) {
                             Text(r.report).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
@@ -75,6 +87,8 @@ struct ContentView: View {
                     description: Text("Drop Bruker or Varian folders, JCAMP-DX, CSV or .zip files here, or press ⌘O."))
             }
         }
+        .onChange(of: tab) { if tab != .polymer { store.plotMarks = [] } }
+        .onChange(of: store.polymerPick) { if store.polymerPick != nil { tab = .polymer } }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
             Task {
                 var urls: [URL] = []
@@ -92,6 +106,30 @@ struct ContentView: View {
     }
 }
 
+extension ContentView {
+    private func plot(_ r: SpectrumResult, range: Binding<ClosedRange<Double>?>? = nil) -> SpectrumView {
+        SpectrumView(result: r, bands: bands.filter { ($0.nucleus == "13C") == r.is13C }, overlay: overlay, highlight: highlight,
+                     tool: store.tool, marks: tab == .polymer ? store.plotMarks : [], view: range ?? $plotRange,
+                     onRange: { a, b in store.handleRange(a, b) },
+                     onClick: { ppm, pt, yFrac, w, perPt, hit in store.handleClick(ppm: ppm, point: pt, yFrac: yFrac, hit: hit, plotWidth: w, ppmPerPoint: perPt) })
+    }
+
+    /// Renders the current view of the plot at print size and saves it as PNG.
+    @MainActor private func exportPNG(_ r: SpectrumResult) {
+        let content = plot(r, range: .constant(plotRange))
+            .frame(width: 1600, height: 800)
+            .background(Color.white)
+            .environment(\.colorScheme, .light)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        guard let img = renderer.nsImage, let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else {
+            store.errorMessage = "Could not render the plot"; return
+        }
+        store.save(png, name: store.fileBase + ".png", type: .png)
+    }
+}
+
 struct ProcessingBar: View {
     @EnvironmentObject var store: Store
     let result: SpectrumResult
@@ -104,11 +142,6 @@ struct ProcessingBar: View {
                 HStack { Text("PH0").font(.caption); Slider(value: $ph0, in: -180...180, onEditingChanged: { editing in if !editing { store.apply(["ph0": ph0]) } }).frame(width: 120) }
                 HStack { Text("PH1").font(.caption); Slider(value: $ph1, in: -360...360, onEditingChanged: { editing in if !editing { store.apply(["ph1": ph1]) } }).frame(width: 120) }
                 Button("Auto phase") { store.apply(["autoPhase": true]) }
-            }
-            if !result.is13C {
-                Toggle("Integrate", isOn: $store.integrateMode)
-                    .toggleStyle(.button)
-                    .help("Drag across a signal to add an integral region")
             }
             Toggle("Baseline", isOn: Binding(get: { result.params.baseline }, set: { store.apply(["baseline": $0]) }))
             Stepper("Peak S/N \(Int(result.params.snr))", value: Binding(get: { result.params.snr }, set: { store.apply(["snr": $0]) }), in: 3...60, step: 1)

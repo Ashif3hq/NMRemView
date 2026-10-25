@@ -26,6 +26,10 @@ struct NMRemViewApp: App {
                     NSApplication.shared.orderFrontStandardAboutPanel(options: [.credits: credits])
                 }
             }
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo") { store.undo() }.keyboardShortcut("z").disabled(!store.canUndo)
+                Button("Redo") { store.redo() }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!store.canRedo)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("Open NMR Data…") { store.presentOpenPanel() }
                     .keyboardShortcut("o")

@@ -1685,8 +1685,14 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         }
         return s2 / c;
       };
-      ya = avg(a);
-      yb = avg(b);
+      const q = Math.max(1, Math.floor((b - a) / 4));
+      const low = (i0, i1) => {
+        let m = Infinity;
+        for (let i = i0; i <= i1; i += Math.max(1, Math.floor(w / 2))) m = Math.min(m, avg(i));
+        return m;
+      };
+      ya = Math.min(avg(a), low(a, a + q));
+      yb = Math.min(avg(b), low(b - q, b));
     }
     let s = 0;
     for (let k = a; k <= b; k++) s += y[k] - (ya + (yb - ya) * (k - a) / Math.max(1, b - a));
@@ -2305,6 +2311,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       manualRegions: [],
       // { ppm, value }: the integral containing ppm is set to value and all others scale with it.
       integralRef: null,
+      // Manual peak picking, stored on the unreferenced scale so re-referencing keeps them in place.
+      peakEdits: { add: [], remove: [] },
+      // Labels on signals and free notes: [{ ppm, text, kind: 'label' | 'note', yFrac }], also unreferenced.
+      annotations: [],
       // Raw FIDs from vendors whose headers are not referenced get referenced to the solvent.
       autoReference: !!ds.fid && ["jeol", "nmrpipe", "magritek", "nmrml", "mnova"].includes(ds.fid.origin),
       excluded: []
@@ -2358,6 +2368,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
           a = analyse(spec, { snr: params.snr });
         }
       }
+      applyPeakEdits(spec, a, params);
       let signals = a.multiplets;
       if (params.manualRegions.length && /1H/.test(spec.nucleus)) {
         const ax = ppmAxis(spec);
@@ -2411,6 +2422,27 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       },
       run
     };
+  }
+  function applyPeakEdits(spec, a, params) {
+    const { add, remove } = params.peakEdits || { add: [], remove: [] };
+    if (!add.length && !remove.length) return;
+    const is13 = /13C/.test(spec.nucleus);
+    const tol = is13 ? 0.05 : 4e-3;
+    const shift = params.referenceShift;
+    a.peaks = a.peaks.filter((p) => !remove.some((r) => Math.abs(r + shift - p.ppm) < tol));
+    const ax = ppmAxis(spec);
+    const y = spec.real;
+    for (const raw of add) {
+      const ppm = raw + shift;
+      if (a.peaks.some((p) => Math.abs(p.ppm - ppm) < tol)) continue;
+      const i = Math.round(ax.index(ppm));
+      if (i < 1 || i >= y.length - 1) continue;
+      a.peaks.push({ index: i, ppm: ax.at(i), height: y[i], widthHz: 0, snr: a.noise ? y[i] / a.noise : 0, manual: true });
+    }
+    a.peaks.sort((p, q) => q.ppm - p.ppm);
+    if (is13) {
+      a.multiplets = a.peaks.map((p) => ({ ppm: p.ppm, ppmFrom: p.ppm + 0.15, ppmTo: p.ppm - 0.15, area: p.height, height: p.height, multiplicity: "s", J: [], lines: [p.ppm], peaks: [p] }));
+    }
   }
   function solventOffset(spec, peaks) {
     const sol = findSolvent(spec.solvent);

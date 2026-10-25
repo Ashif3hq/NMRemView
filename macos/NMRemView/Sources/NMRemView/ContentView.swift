@@ -3,14 +3,14 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject var store: Store
-    @State private var tab: Tab = .polymer
+    @State private var tab: Tab = .signals
     @State private var bands: [ShiftGroup] = []
     @State private var overlay: CompoundMatch?
     @State private var highlight: Signal?
     @State private var dropTargeted = false
     @State private var plotRange: ClosedRange<Double>?
 
-    enum Tab: String, CaseIterable { case polymer = "Polymer", signals = "Signals", suggestions = "Suggestions", lookup = "Lookup & solvents" }
+    enum Tab: String, CaseIterable { case signals = "Signals", suggestions = "Suggestions", polymer = "Polymer", lookup = "Lookup" }
 
     var body: some View {
         NavigationSplitView {

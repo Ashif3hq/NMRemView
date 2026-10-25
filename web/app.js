@@ -14,9 +14,9 @@ const SAMPLES = [
   { file: 'samples/benchtop-60mhz-1h.jdx', label: 'Benchtop ¹H · JCAMP FID, 60 MHz' },
 ];
 
-const state = { items: [], current: -1, tab: 'polymer', query: '', bands: new Set(), compound: null, refPick: null, hoverSig: null };
+const state = { items: [], current: -1, tab: 'signals', query: '', bands: new Set(), compound: null, refPick: null, hoverSig: null };
 let tabSaved;
-try { tabSaved = localStorage.getItem('nmremview.tab2'); } catch (e) { /* storage unavailable */ }
+try { tabSaved = localStorage.getItem('nmremview.tab'); } catch (e) { /* storage unavailable */ }
 if (tabSaved) state.tab = tabSaved;
 
 const viewer = new SpectrumViewer($('plot'), {
@@ -124,7 +124,7 @@ function renderReport() {
 // ---------- Tabs ----------
 function setTab(t) {
   state.tab = t;
-  try { localStorage.setItem('nmremview.tab2', t); } catch (e) { /* ignore */ }
+  try { localStorage.setItem('nmremview.tab', t); } catch (e) { /* ignore */ }
   for (const b of $('tabs').querySelectorAll('button')) b.classList.toggle('active', b.dataset.tab === t);
   renderTab();
 }

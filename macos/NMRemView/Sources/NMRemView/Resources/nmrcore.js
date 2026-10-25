@@ -2444,6 +2444,15 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       a.multiplets = a.peaks.map((p) => ({ ppm: p.ppm, ppmFrom: p.ppm + 0.15, ppmTo: p.ppm - 0.15, area: p.height, height: p.height, multiplicity: "s", J: [], lines: [p.ppm], peaks: [p] }));
     }
   }
+  function snapToPeak(spec, ppm) {
+    const ax = ppmAxis(spec);
+    const y = spec.real;
+    const w = Math.max(2, Math.round((/13C/.test(spec.nucleus) ? 0.3 : 0.02) / Math.abs(ax.step)));
+    const c = Math.round(ax.index(ppm));
+    let best = c;
+    for (let i = Math.max(1, c - w); i <= Math.min(y.length - 2, c + w); i++) if (y[i] > y[best]) best = i;
+    return ax.at(best);
+  }
   function solventOffset(spec, peaks) {
     const sol = findSolvent(spec.solvent);
     const is13 = /13C/.test(spec.nucleus);
@@ -2648,7 +2657,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       ppmEnd: s.ppmEnd,
       points: s.real.length,
       y: decimate(s.real, cols || 4096),
-      peaks: r.analysis.peaks.map((p) => ({ ppm: p.ppm, height: p.height })),
+      peaks: r.analysis.peaks.map((p) => ({ ppm: p.ppm, height: p.height, manual: !!p.manual })),
       signals: r.analysis.multiplets.map(sig),
       hints: r.suggestions.hints.map((h) => ({ text: h.text, detail: h.detail })),
       compounds: r.suggestions.compounds.map((c) => ({ name: c.compound.name, formula: c.compound.formula, score: c.score, h: c.compound.h.map((x) => x[0]), c: c.compound.c })),
@@ -2663,7 +2672,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         referenceShift: r.params.referenceShift,
         formula: r.params.formula,
         manualRegions: r.params.manualRegions.map(([a, b]) => [a, b]),
-        hasIntegralRef: !!r.params.integralRef
+        hasIntegralRef: !!r.params.integralRef,
+        integralRef: r.params.integralRef ? { ppm: r.params.integralRef.ppm, value: r.params.integralRef.value } : null,
+        peakEdits: { add: [...r.params.peakEdits.add], remove: [...r.params.peakEdits.remove] },
+        annotations: r.params.annotations.map((a) => ({ ppm: a.ppm, text: a.text, kind: a.kind, yFrac: a.yFrac ?? null }))
       },
       integralUnit: r.integralUnit || 0
     };
@@ -2729,6 +2741,53 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         composition: comp.map((x) => ({ name: x.name, molPct: x.molPct, wtPct: x.wtPct })),
         microstructure: micro ? { rows: micro.rows, cis: micro.cisTrans ? micro.cisTrans.cis : null, trans: micro.cisTrans ? micro.cisTrans.trans : null, note: micro.note } : null
       });
+    },
+    // Nearest local maximum to a clicked shift.
+    snap(id, ppm) {
+      const r = lastResults.get(id);
+      return r ? snapToPeak(r.spectrum, ppm) : ppm;
+    },
+    // Tallest point between two shifts (peak picking by dragging over a region).
+    tallest(id, a, b) {
+      const r = lastResults.get(id);
+      if (!r) return (a + b) / 2;
+      const s = r.spectrum, n = s.real.length, step = (s.ppmEnd - s.ppmStart) / (n - 1);
+      const i0 = Math.max(1, Math.round((Math.max(a, b) - s.ppmStart) / step)), i1 = Math.min(n - 2, Math.round((Math.min(a, b) - s.ppmStart) / step));
+      let best = i0;
+      for (let i = i0; i <= i1; i++) if (s.real[i] > s.real[best]) best = i;
+      return s.ppmStart + best * step;
+    },
+    // The shift a clicked reference peak most likely is: TMS or the solvent residual.
+    suggestReference(id, ppm) {
+      const r = lastResults.get(id);
+      if (!r) return ppm;
+      const is13 = /13C/.test(r.spectrum.nucleus);
+      const sol = findSolvent(r.spectrum.solvent);
+      const refs = [0, ...sol ? is13 ? sol.c : sol.h : []];
+      const best = refs.reduce((b, v) => Math.abs(v - ppm) < Math.abs(b - ppm) ? v : b, refs[0]);
+      return Math.abs(best - ppm) < (is13 ? 3 : 0.3) ? best : Math.round(ppm * 1e3) / 1e3;
+    },
+    // CSV and text exports: kind is 'peaks', 'ints' or 'report'.
+    exportText(id, kind) {
+      const r = lastResults.get(id);
+      if (!r) return "";
+      const s = r.spectrum, freq = s.frequency || 0, is13 = /13C/.test(s.nucleus), sh = r.params.referenceShift;
+      const cell = (v) => /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+      const csv = (rows) => rows.map((row) => row.map(cell).join(",")).join("\n");
+      if (kind === "peaks") {
+        const maxH = Math.max(...r.analysis.peaks.map((p) => p.height), 1);
+        return csv([["ppm", "Hz", "height", "relative %", "picked"]].concat(r.analysis.peaks.map((p) => [p.ppm.toFixed(4), freq ? (p.ppm * freq).toFixed(2) : "", p.height.toPrecision(6), (100 * p.height / maxH).toFixed(2), p.manual ? "manual" : "auto"])));
+      }
+      if (kind === "ints") {
+        const ann = r.params.annotations || [];
+        const label = (m) => ann.filter((a) => a.kind === "label" && a.ppm + sh <= m.ppmFrom + 1e-6 && a.ppm + sh >= m.ppmTo - 1e-6).map((a) => a.text).join("; ");
+        const sigs = r.analysis.multiplets.filter((m) => !m.excluded && (!m.minor || m.manual || m.reference || is13));
+        let out = csv([["from ppm", "to ppm", "centre ppm", "multiplicity", "J (Hz)", "integral", "label", "environment"]].concat(sigs.map((m) => [m.ppmFrom.toFixed(3), m.ppmTo.toFixed(3), m.ppm.toFixed(3), m.multiplicity || "", (m.J || []).map((j) => j.toFixed(1)).join(" "), is13 ? "" : (m.nH || 0).toFixed(3), label(m), m.candidates && m.candidates[0] ? m.candidates[0].group.name : ""])));
+        const notes = ann.filter((a) => a.kind === "note");
+        if (notes.length) out += "\n\n" + csv([["note at ppm", "text"]].concat(notes.map((a) => [(a.ppm + sh).toFixed(3), a.text])));
+        return out;
+      }
+      return r.report;
     },
     search(query) {
       const r = searchReference(query);

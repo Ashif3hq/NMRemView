@@ -21,6 +21,28 @@ struct OpenResult: Codable {
 struct Peak: Codable, Hashable {
     let ppm: Double
     let height: Double
+    let manual: Bool
+}
+
+/// Hand-picked peaks, stored on the unreferenced scale so re-referencing keeps them in place.
+struct PeakEdits: Codable, Hashable {
+    var add: [Double]
+    var remove: [Double]
+    var json: [String: Any] { ["add": add, "remove": remove] }
+}
+
+/// A label on a signal or a free note on the plot (ppm on the unreferenced scale).
+struct Annotation: Codable, Hashable {
+    var ppm: Double
+    var text: String
+    var kind: String
+    var yFrac: Double?
+    var json: [String: Any] { ["ppm": ppm, "text": text, "kind": kind, "yFrac": yFrac.map { $0 as Any } ?? NSNull()] }
+}
+
+struct IntegralRef: Codable, Hashable {
+    let ppm: Double
+    let value: Double
 }
 
 struct Signal: Codable, Identifiable, Hashable {
@@ -65,6 +87,9 @@ struct Params: Codable {
     var formula: String
     var manualRegions: [[Double]]
     var hasIntegralRef: Bool
+    var integralRef: IntegralRef?
+    var peakEdits: PeakEdits
+    var annotations: [Annotation]
 }
 
 struct SpectrumResult: Codable {
@@ -210,6 +235,23 @@ final class CoreBridge {
     func run(id: String, changes: [String: Any] = [:], columns: Int = 4096) throws -> SpectrumResult {
         let json = String(data: try JSONSerialization.data(withJSONObject: changes), encoding: .utf8) ?? "{}"
         return try decode(try call("run", [id, json, columns]))
+    }
+
+    func snap(id: String, ppm: Double) throws -> Double {
+        Double(try call("snap", [id, ppm])) ?? ppm
+    }
+
+    func tallest(id: String, _ a: Double, _ b: Double) throws -> Double {
+        Double(try call("tallest", [id, a, b])) ?? (a + b) / 2
+    }
+
+    func suggestReference(id: String, ppm: Double) throws -> Double {
+        Double(try call("suggestReference", [id, ppm])) ?? ppm
+    }
+
+    /// kind: "peaks", "ints" or "report".
+    func exportText(id: String, kind: String) throws -> String {
+        try call("exportText", [id, kind])
     }
 
     func search(_ query: String) throws -> SearchResult {

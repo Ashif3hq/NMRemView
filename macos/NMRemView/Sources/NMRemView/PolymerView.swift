@@ -64,6 +64,8 @@ struct PolymerView: View {
                         else { Text("Choose a signal").tag(Double?.none) }
                         ForEach(signals) { s in Text(label(s)).tag(Optional(s.ppm)) }
                     }
+                    Button("Pick counting signal on spectrum") { store.tool = .pickRepeat }
+                        .help("Click the repeat-unit signal on the plot, or drag across it to integrate it")
                     number("H per repeat unit", $repeatH)
                     number("M₀ (g/mol)", $m0)
                     if let ri = res?.repeatIntegral { LabeledContent("Integral of counting signal", value: String(format: "%.2f", ri)) }
@@ -81,13 +83,15 @@ struct PolymerView: View {
                             ForEach(signals) { s in Text(label(s)).tag(Optional(s.ppm)) }
                         }
                     }
+                    Button("Pick end-group signal on spectrum") { store.tool = .pickEnd }
+                        .help("Click the end-group signal on the plot, or drag across it to integrate it")
                     if let ei = res?.endIntegral { LabeledContent("End-group integral", value: String(format: "%.3f", ei)) }
                     if let note = endPreset?.note { Text(note).font(.caption).foregroundStyle(.secondary) }
                     number("H in that signal", $endH)
                     Stepper("End groups per chain: \(endCount)", value: $endCount, in: 1...4)
                     number("End-group mass, both ends (g/mol)", $endMass)
                 } header: { Text("End group") } footer: {
-                    Text("End-group signals are usually small. Turn on Integrate in the toolbar and drag across yours if it is not listed.")
+                    Text("End-group signals are usually small. If yours is not listed, use Pick end-group signal on spectrum and drag across it.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Degree of polymerisation") {
@@ -157,6 +161,13 @@ struct PolymerView: View {
                     endId = g.id; endH = g.nH; endMass = (g.mass * 100).rounded() / 100; useEndWindow = g.window != nil
                 }
             }
+            .onChange(of: store.polymerPick) {
+                guard let p = store.polymerPick else { return }
+                if p.repeatUnit { repeatSig = p.ppm } else { useEndWindow = false; endSig = p.ppm }
+            }
+            .onAppear { store.plotMarks = marks }
+            .onChange(of: markKey) { store.plotMarks = marks }
+            .onDisappear { store.plotMarks = [] }
             .onChange(of: polymerId) {
                 if let p = preset { repeatH = p.nH; m0 = (p.m0 * 100).rounded() / 100; repeatSig = nil }
             }
@@ -166,6 +177,20 @@ struct PolymerView: View {
                 UserDefaults.standard.set(endId, forKey: "lastEndGroup")
             }
         }
+    }
+
+    private var markKey: String {
+        "\(polymerId)|\(String(describing: repeatSig))|\(endId)|\(String(describing: endSig))|\(useEndWindow)|\(result.signals.count)|\(result.params.referenceShift)"
+    }
+
+    /// Counting and end-group regions outlined on the plot.
+    private var marks: [PlotMark] {
+        var out: [PlotMark] = []
+        if let ppm = repeatSig, let s = signals.first(where: { abs($0.ppm - ppm) < 1e-4 }) { out.append(PlotMark(from: s.ppmFrom, to: s.ppmTo, text: "repeat unit")) }
+        else if repeatSig == nil, let p = preset { out.append(PlotMark(from: p.from, to: p.to, text: "repeat unit")) }
+        if useEndWindow, let w = endPreset?.window, w.count == 2 { out.append(PlotMark(from: w[0], to: w[1], text: "end group")) }
+        else if let ppm = endSig, let s = signals.first(where: { abs($0.ppm - ppm) < 1e-4 }) { out.append(PlotMark(from: s.ppmFrom, to: s.ppmTo, text: "end group")) }
+        return out
     }
 
     private func number(_ title: String, _ value: Binding<Double>) -> some View {

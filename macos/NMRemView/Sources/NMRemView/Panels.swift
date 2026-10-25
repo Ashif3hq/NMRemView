@@ -42,6 +42,8 @@ struct SignalsView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(s.manual ? "Manual integral" : (s.candidates.first ?? "–"))
+                            let lab = store.labels(for: s)
+                            if !lab.isEmpty { Text(lab).font(.caption.weight(.semibold)).foregroundStyle(.purple) }
                             if let f = s.flag { Text(f).font(.caption).foregroundStyle(.orange) }
                         }
                         Spacer()
@@ -53,7 +55,7 @@ struct SignalsView: View {
                 }
             }
             if !result.is13C {
-                Text("Type a value in nH to set that integral; the others scale with it. Turn on Integrate in the toolbar and drag across a signal to add a region.")
+                Text("Type a value in nH to set that integral; the others scale with it. Choose Integrate in the toolbar and drag across a signal to add a region, or ∫ = n and click a signal to set the reference integral.")
                     .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.bottom, 8)
             }
         }

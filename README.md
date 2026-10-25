@@ -2,6 +2,13 @@
 
 **Created and maintained by [Ashif](https://github.com/Ashif3hq).**
 
+### [⬇ Download for macOS (Apple silicon)](https://github.com/Ashif3hq/NMRemView/releases/latest/download/NMRemView-macOS-arm64.zip) · [▶ Open the web version](https://claude.ai/artifact/XS2cMA3a168QonPK8RjwjB)
+
+The macOS link always fetches the newest release (macOS 14+, M1 or later). Unzip, move
+NMRemView.app to Applications, then right-click it and choose **Open** the first time, because the
+app is not notarised yet. All versions are on the [Releases page](https://github.com/Ashif3hq/NMRemView/releases).
+The web version runs in the browser and your files never leave your computer.
+
 Fast, friendly ¹H and ¹³C NMR analysis for chemists: open almost any 1D NMR file, get a
 processed, phased, integrated spectrum with multiplets, a journal-ready peak list, likely
 assignments and structure suggestions, plus searchable reference shift data by element or

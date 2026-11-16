@@ -1013,3 +1013,23 @@ setTab(state.tab);
   await loadSample(SAMPLES[0]);
   await loadSample(SAMPLES[1], false);
 })();
+
+// ---------- Theme: light by default, toggle remembered per browser ----------
+(function () {
+  let saved = null;
+  try { saved = localStorage.getItem('nmremview-theme'); } catch (e) {}
+  const apply = (t) => {
+    document.documentElement.dataset.theme = t;
+    const next = t === 'dark' ? 'light' : 'dark';
+    const btn = $('themeBtn');
+    btn.textContent = t === 'dark' ? '☀ Light' : '☾ Dark';
+    btn.title = btn.ariaLabel = `Switch to ${next} mode`;
+    viewer.draw();
+  };
+  apply(saved === 'dark' ? 'dark' : 'light');
+  $('themeBtn').addEventListener('click', () => {
+    const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('nmremview-theme', t); } catch (e) {}
+    apply(t);
+  });
+})();

@@ -208,6 +208,7 @@ tr.ref .nh-in { border-color: var(--accent); }
 .comp-row input, .comp-row select { padding: 4px 5px; font-size: 12px; }
 .pctbar { height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; }
 .credit { color: var(--muted); font-size: 12px; text-decoration: none; margin-left: 8px; }
+.theme-toggle { min-width: 72px; }
 .credit:hover { color: var(--accent); text-decoration: underline; }
 .linkish { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
 .pctbar i { display: block; height: 100%; background: var(--accent); }
@@ -229,6 +230,7 @@ tr.ref .nh-in { border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 
+<script>(function(){var t='light';try{if(localStorage.getItem('nmremview-theme')==='dark')t='dark'}catch(e){}document.documentElement.dataset.theme=t})();</script>
 <div class="app" id="app">
   <header class="top">
     <div class="brand"><h1>NMR<span>em</span>View</h1><span class="pill">Web trial</span><a class="credit" href="https://github.com/Ashif3hq/NMRemView" target="_blank" rel="noopener">by Ashif</a></div>
@@ -237,6 +239,7 @@ tr.ref .nh-in { border-color: var(--accent); }
     <input type="file" id="dirInput" webkitdirectory multiple hidden>
     <button class="btn" id="openDir" type="button">Open folder…</button>
     <span class="spacer"></span>
+    <button class="btn theme-toggle" id="themeBtn" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">☾ Dark</button>
     <span class="pill" id="status">Ready</span>
   </header>
 

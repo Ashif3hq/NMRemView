@@ -2,7 +2,7 @@
 
 **Created and maintained by [Ashif](https://github.com/Ashif3hq).**
 
-### [⬇ Download for macOS (Apple silicon)](https://github.com/Ashif3hq/NMRemView/releases/latest/download/NMRemView-macOS-arm64.zip) · [▶ Open the web version](https://claude.ai/artifact/XS2cMA3a168QonPK8RjwjB)
+### [⬇ Download for macOS (Apple silicon)](https://github.com/Ashif3hq/NMRemView/releases/latest/download/NMRemView-macOS-arm64.zip) · [▶ Open the web version](https://ashif3hq.github.io/nmremview/)
 
 The macOS link always fetches the newest release (macOS 14+, M1 or later). Unzip, move
 NMRemView.app to Applications, then right-click it and choose **Open** the first time, because the

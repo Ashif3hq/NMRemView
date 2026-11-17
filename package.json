@@ -3,7 +3,7 @@
   "version": "0.7.2",
   "private": true,
   "type": "module",
-  "description": "NMRemView: 1H/13C NMR processing and analysis core, web trial and macOS app",
+  "description": "NMRemView: 1H/13C NMR processing and analysis core, web app and macOS app",
   "scripts": {
     "build:web": "node scripts/build-web.mjs",
     "build:core": "node scripts/build-core-bundle.mjs",

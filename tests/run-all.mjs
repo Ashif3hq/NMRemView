@@ -63,6 +63,23 @@ for (const c of cases) {
   console.log(bad.length ? 'FAIL' : 'ok  ', 'exports round-trip', bad.join(' '));
   if (bad.length) fail++;
 }
+// Partial Bruker selections: a pdata folder alone loads its processed spectrum; a lone fid or
+// parameter file gives one clear hint, never "No 1D NMR data found in JCAMP file".
+{
+  const all = await N.unzip(new Uint8Array(fs.readFileSync('web/samples/strychnine-1h.zip')));
+  const pick = (prefix, strip) => new Map([...all].filter(([p]) => p.startsWith(prefix)).map(([p, d]) => [p.slice(strip.length), d]));
+  const bad = [];
+  for (const [label, files] of [['pdata', pick('strychnine/10/pdata/', 'strychnine/10/')], ['pdata/1', pick('strychnine/10/pdata/1/', 'strychnine/10/pdata/')]]) {
+    const r = N.loadExpanded(files);
+    if (r.datasets.length !== 1 || r.warnings.length || !/^Strychnine/.test(N.createSession(r.datasets[0]).run().suggestions.compounds[0]?.compound.name || '')) bad.push(label);
+  }
+  for (const label of ['fid', 'pdata/1/proc', 'acqu']) {
+    const r = N.loadExpanded(pick('strychnine/10/' + label, 'strychnine/10/' + label.replace(/[^/]*$/, '')));
+    if (r.datasets.length || r.warnings.length !== 1 || /JCAMP/.test(r.warnings[0]) || !/experiment folder/.test(r.warnings[0])) bad.push(label + ' ' + r.warnings.join('|'));
+  }
+  console.log(bad.length ? 'FAIL' : 'ok  ', 'partial Bruker folders', bad.join('; '));
+  if (bad.length) fail++;
+}
 // Private documents (not in git): every .mnova in tests/private must yield spectra.
 const priv = new URL('./private/', import.meta.url);
 if (fs.existsSync(priv)) for (const f of fs.readdirSync(priv).filter((x) => /\.mnova$/i.test(x))) {

@@ -43,13 +43,45 @@ final class Store: ObservableObject {
     func open(urls: [URL]) {
         guard let core else { return }
         var files: [String: Data] = [:]
-        for url in urls { collect(url: url, prefix: "", into: &files) }
+        var roots: [URL] = []
+        for url in urls.map(experimentRoot) where !roots.contains(where: { $0.standardizedFileURL.path == url.standardizedFileURL.path }) {
+            roots.append(url)
+        }
+        // Skip anything already inside another chosen folder.
+        roots = roots.filter { u in !roots.contains { r in r != u && u.standardizedFileURL.path.hasPrefix(r.standardizedFileURL.path + "/") } }
+        for url in roots { collect(url: url, prefix: "", into: &files) }
         do {
             let r = try core.open(files: files)
             warnings = r.warnings
             datasets.append(contentsOf: r.datasets)
             if let first = r.datasets.first { select(first.id) }
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    /// A Bruker or Varian/Agilent file (fid, ser, acqus, procpar, ...) or a pdata folder only makes
+    /// sense with the rest of its experiment, so opening one opens the whole experiment folder.
+    private func experimentRoot(_ url: URL) -> URL {
+        let fm = FileManager.default
+        func isExperiment(_ dir: URL) -> Bool {
+            fm.fileExists(atPath: dir.appendingPathComponent("acqus").path)
+                || fm.fileExists(atPath: dir.appendingPathComponent("procpar").path)
+        }
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return url }
+        // Self-contained files are opened as they are.
+        if !isDir.boolValue, ["zip", "jdf", "mnova", "jdx", "dx", "jcamp", "nmrml", "xml", "csv", "tsv", "txt", "xy", "asc"]
+            .contains(url.pathExtension.lowercased()) { return url }
+        var dir = isDir.boolValue ? url : url.deletingLastPathComponent()
+        if !isDir.boolValue, isExperiment(dir) { return dir }
+        // Walk up out of pdata/<n>/... to the experiment folder.
+        for _ in 0..<3 {
+            if dir.lastPathComponent == "pdata" {
+                let exp = dir.deletingLastPathComponent()
+                return isExperiment(exp) ? exp : url
+            }
+            dir = dir.deletingLastPathComponent()
+        }
+        return url
     }
 
     /// Reads a file or folder tree into relative-path → data. Zip archives are expanded with ditto.

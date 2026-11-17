@@ -16,12 +16,13 @@ export function parseBrukerParams(text) {
   return out;
 }
 
-function readInts(buf, bigEndian, float64) {
+// Bruker DTYPA/DTYPP: 0 = int32, 1 = float32, 2 = float64.
+function readInts(buf, bigEndian, float64, float32 = false) {
   const dv = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset || 0, buf.byteLength);
   const size = float64 ? 8 : 4;
   const n = Math.floor(dv.byteLength / size);
   const out = new Float64Array(n);
-  for (let i = 0; i < n; i++) out[i] = float64 ? dv.getFloat64(i * 8, !bigEndian) : dv.getInt32(i * 4, !bigEndian);
+  for (let i = 0; i < n; i++) out[i] = float64 ? dv.getFloat64(i * 8, !bigEndian) : float32 ? dv.getFloat32(i * 4, !bigEndian) : dv.getInt32(i * 4, !bigEndian);
   return out;
 }
 
@@ -32,9 +33,11 @@ const dec = (b) => new TextDecoder('latin1').decode(b);
 export function readBruker(files, name = 'bruker', opts = {}) {
   const get = (p) => files.get(p);
   const acqusBuf = get('acqus');
-  if (!acqusBuf) throw new Error('Bruker folder has no acqus file');
-  const acqus = parseBrukerParams(dec(acqusBuf));
-  const nucleus = (acqus.$NUC1 || '1H').replace(/[<>]/g, '');
+  if (!acqusBuf && !(get('pdata/1/procs') && get('pdata/1/1r'))) throw new Error('Bruker folder has no acqus file');
+  // Without acqus (only a pdata folder was opened) the processed spectrum is still readable.
+  const acqus = acqusBuf ? parseBrukerParams(dec(acqusBuf)) : {};
+  const procs0 = get('pdata/1/procs') ? parseBrukerParams(dec(get('pdata/1/procs'))) : {};
+  const nucleus = String(acqus.$NUC1 || procs0.$AXNUC || '1H').replace(/[<>]/g, '');
   const solvent = acqus.$SOLVENT;
   const meta = {
     pulseSequence: acqus.$PULPROG, scans: num(acqus.$NS), temperature: num(acqus.$TE),
@@ -47,10 +50,10 @@ export function readBruker(files, name = 'bruker', opts = {}) {
   // Raw FID
   let fid = null;
   const fidBuf = get('fid');
-  if (fidBuf || opts.fidValues) {
+  if (acqusBuf && (fidBuf || opts.fidValues)) {
     const td = num(acqus.$TD);
     const big = num(acqus.$BYTORDA) === 1;
-    const raw = opts.fidValues || readInts(fidBuf, big, num(acqus.$DTYPA) === 2);
+    const raw = opts.fidValues || readInts(fidBuf, big, num(acqus.$DTYPA) === 2, num(acqus.$DTYPA) === 1);
     // TD counts real+imag points; files are padded to 256-value blocks.
     const n = Math.min(Math.floor((td || raw.length) / 2), Math.floor(raw.length / 2));
     const scale = Math.pow(2, num(acqus.$NC) || 0);
@@ -74,9 +77,10 @@ export function readBruker(files, name = 'bruker', opts = {}) {
     const procs = parseBrukerParams(dec(procsBuf));
     const big = num(procs.$BYTORDP) === 1;
     const scale = Math.pow(2, num(procs.$NCPROC) || 0);
-    const real = readInts(rBuf, big, num(procs.$DTYPP) === 2).map((v) => v * scale);
+    const dt = num(procs.$DTYPP);
+    const real = readInts(rBuf, big, dt === 2, dt === 1).map((v) => v * scale);
     const iBuf = get('pdata/1/1i');
-    const imag = iBuf ? readInts(iBuf, big, num(procs.$DTYPP) === 2).map((v) => v * scale) : null;
+    const imag = iBuf ? readInts(iBuf, big, dt === 2, dt === 1).map((v) => v * scale) : null;
     const si = real.length;
     const sf = num(procs.$SF);
     const offset = num(procs.$OFFSET);
@@ -84,8 +88,9 @@ export function readBruker(files, name = 'bruker', opts = {}) {
     const ppmEnd = offset - (swp / sf) * ((si - 1) / si);
     spectrum = { real, imag, ppmStart: offset, ppmEnd };
     base.frequency = sf || base.frequency;
+    if (!base.solvent && procs.$SOLVENT) base.solvent = procs.$SOLVENT;
     base.processing = { ph0: num(procs.$PHC0), ph1: num(procs.$PHC1), lb: num(procs.$LB) };
   }
-  if (!fid && !spectrum) throw new Error('Bruker folder has neither fid nor pdata/1/1r');
+  if (!fid && !spectrum) throw new Error('no fid or processed spectrum (pdata/1/1r) found here. Open the whole experiment folder (the numbered folder holding acqus and fid), or a .zip of it.');
   return { ...base, fid, ...(spectrum || {}) };
 }

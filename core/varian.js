@@ -44,11 +44,13 @@ export function readVarian(files, name = 'varian') {
   const dv = new DataView(fidBuf.buffer, fidBuf.byteOffset, fidBuf.byteLength);
   const nblocks = dv.getInt32(0), ntraces = dv.getInt32(4), np = dv.getInt32(8);
   const ebytes = dv.getInt32(12), status = dv.getInt16(26);
+  const nbheaders = Math.max(1, dv.getInt32(28));
   const isFloat = (status & 0x8) !== 0;
   const n = np / 2;
   const re = new Float64Array(n), im = new Float64Array(n);
   // Sum all blocks/traces of the first increment set (1D: usually one block).
-  let off = 32 + 28;
+  // File header (32 bytes), then each block starts with nbheaders 28-byte block headers.
+  let off = 32 + 28 * nbheaders;
   const read = (o) => (isFloat ? dv.getFloat32(o) : ebytes === 4 ? dv.getInt32(o) : dv.getInt16(o));
   for (let k = 0; k < n; k++) {
     re[k] = read(off + 2 * k * ebytes);

@@ -367,21 +367,22 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     }
     return out;
   }
-  function readInts(buf, bigEndian, float64) {
+  function readInts(buf, bigEndian, float64, float32 = false) {
     const dv = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset || 0, buf.byteLength);
     const size = float64 ? 8 : 4;
     const n = Math.floor(dv.byteLength / size);
     const out = new Float64Array(n);
-    for (let i = 0; i < n; i++) out[i] = float64 ? dv.getFloat64(i * 8, !bigEndian) : dv.getInt32(i * 4, !bigEndian);
+    for (let i = 0; i < n; i++) out[i] = float64 ? dv.getFloat64(i * 8, !bigEndian) : float32 ? dv.getFloat32(i * 4, !bigEndian) : dv.getInt32(i * 4, !bigEndian);
     return out;
   }
   var dec = (b) => new TextDecoder("latin1").decode(b);
   function readBruker(files, name = "bruker", opts = {}) {
     const get = (p) => files.get(p);
     const acqusBuf = get("acqus");
-    if (!acqusBuf) throw new Error("Bruker folder has no acqus file");
-    const acqus = parseBrukerParams(dec(acqusBuf));
-    const nucleus = (acqus.$NUC1 || "1H").replace(/[<>]/g, "");
+    if (!acqusBuf && !(get("pdata/1/procs") && get("pdata/1/1r"))) throw new Error("Bruker folder has no acqus file");
+    const acqus = acqusBuf ? parseBrukerParams(dec(acqusBuf)) : {};
+    const procs0 = get("pdata/1/procs") ? parseBrukerParams(dec(get("pdata/1/procs"))) : {};
+    const nucleus = String(acqus.$NUC1 || procs0.$AXNUC || "1H").replace(/[<>]/g, "");
     const solvent = acqus.$SOLVENT;
     const meta = {
       pulseSequence: acqus.$PULPROG,
@@ -396,10 +397,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const base = { name, title: title || name, nucleus, solvent, frequency: num(acqus.$SFO1), meta, source: "Bruker" };
     let fid = null;
     const fidBuf = get("fid");
-    if (fidBuf || opts.fidValues) {
+    if (acqusBuf && (fidBuf || opts.fidValues)) {
       const td = num(acqus.$TD);
       const big = num(acqus.$BYTORDA) === 1;
-      const raw = opts.fidValues || readInts(fidBuf, big, num(acqus.$DTYPA) === 2);
+      const raw = opts.fidValues || readInts(fidBuf, big, num(acqus.$DTYPA) === 2, num(acqus.$DTYPA) === 1);
       const n = Math.min(Math.floor((td || raw.length) / 2), Math.floor(raw.length / 2));
       const scale = Math.pow(2, num(acqus.$NC) || 0);
       const re = new Float64Array(n), im = new Float64Array(n);
@@ -427,9 +428,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       const procs = parseBrukerParams(dec(procsBuf));
       const big = num(procs.$BYTORDP) === 1;
       const scale = Math.pow(2, num(procs.$NCPROC) || 0);
-      const real = readInts(rBuf, big, num(procs.$DTYPP) === 2).map((v) => v * scale);
+      const dt = num(procs.$DTYPP);
+      const real = readInts(rBuf, big, dt === 2, dt === 1).map((v) => v * scale);
       const iBuf = get("pdata/1/1i");
-      const imag = iBuf ? readInts(iBuf, big, num(procs.$DTYPP) === 2).map((v) => v * scale) : null;
+      const imag = iBuf ? readInts(iBuf, big, dt === 2, dt === 1).map((v) => v * scale) : null;
       const si = real.length;
       const sf = num(procs.$SF);
       const offset = num(procs.$OFFSET);
@@ -437,9 +439,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       const ppmEnd = offset - swp / sf * ((si - 1) / si);
       spectrum = { real, imag, ppmStart: offset, ppmEnd };
       base.frequency = sf || base.frequency;
+      if (!base.solvent && procs.$SOLVENT) base.solvent = procs.$SOLVENT;
       base.processing = { ph0: num(procs.$PHC0), ph1: num(procs.$PHC1), lb: num(procs.$LB) };
     }
-    if (!fid && !spectrum) throw new Error("Bruker folder has neither fid nor pdata/1/1r");
+    if (!fid && !spectrum) throw new Error("no fid or processed spectrum (pdata/1/1r) found here. Open the whole experiment folder (the numbered folder holding acqus and fid), or a .zip of it.");
     return { ...base, fid, ...spectrum || {} };
   }
 
@@ -486,10 +489,11 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const dv = new DataView(fidBuf.buffer, fidBuf.byteOffset, fidBuf.byteLength);
     const nblocks = dv.getInt32(0), ntraces = dv.getInt32(4), np = dv.getInt32(8);
     const ebytes = dv.getInt32(12), status = dv.getInt16(26);
+    const nbheaders = Math.max(1, dv.getInt32(28));
     const isFloat = (status & 8) !== 0;
     const n = np / 2;
     const re = new Float64Array(n), im = new Float64Array(n);
-    let off = 32 + 28;
+    let off = 32 + 28 * nbheaders;
     const read = (o) => isFloat ? dv.getFloat32(o) : ebytes === 4 ? dv.getInt32(o) : dv.getInt16(o);
     for (let k = 0; k < n; k++) {
       re[k] = read(off + 2 * k * ebytes);
@@ -1096,7 +1100,11 @@ if (typeof globalThis.TextDecoder === 'undefined') {
   // core/loader.js
   var JCAMP_EXT = /\.(jdx|dx|jcamp|jcm)$/i;
   var TEXT_EXT = /\.(csv|tsv|txt|asc|xy)$/i;
-  function loadExpanded(all) {
+  var EXPERIMENT_PART = /^(fid|ser|acqus?|acqu[2-8]s?|procs?|proc[2-8]s?|[12][ri]|[23][ri]{2,3}|outd|curdat2?|clevels|meta|audit[ap]?\.txt|pulseprogram|uxnmr\.(par|info)|specpar|format\.(temp|ased)|scon2?|shimvalues|title|procpar|text|log)$/i;
+  var JCAMP_DATA = /##\s*(XYDATA|XYPOINTS|PEAK\s*TABLE|NTUPLES|DATA\s*TABLE)\s*=/i;
+  var junk = (p) => /(^|\/)__MACOSX\//.test(p) || /(^|\/)(\._[^/]*|\.DS_Store)$/.test(p);
+  function loadExpanded(input) {
+    const all = new Map([...input].filter(([p]) => !junk(p)));
     const datasets = [];
     const warnings = [];
     const used = /* @__PURE__ */ new Set();
@@ -1108,6 +1116,22 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         continue;
       }
       const sub = subset(all, dir);
+      try {
+        datasets.push(normalise(readBruker(sub, nameFor(dir, "Bruker"))));
+      } catch (e) {
+        warnings.push(`${dir}: ${e.message}`);
+      }
+      markUsed(all, dir, used);
+    }
+    const procDirs = [...all.keys()].filter((p) => /(^|\/)procs$/.test(p) && !used.has(p)).map((p) => p.replace(/procs$/, ""));
+    for (const dir of procDirs.sort()) {
+      if (!all.has(dir + "1r")) continue;
+      if (all.has(dir + "proc2s")) {
+        warnings.push(`${dir || "Bruker data"}: 2D experiment skipped (1D only for now)`);
+        markUsed(all, dir, used);
+        continue;
+      }
+      const sub = new Map([...subset(all, dir)].map(([p, d]) => ["pdata/1/" + p, d]));
       try {
         datasets.push(normalise(readBruker(sub, nameFor(dir, "Bruker"))));
       } catch (e) {
@@ -1135,9 +1159,16 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       }
       for (const f of ["acqu.par", "data.1d", "spectrum.1d"]) used.add(dir + f);
     }
+    const orphans = [];
     for (const [path, data] of all) {
       if (used.has(path)) continue;
       const base = path.split("/").pop();
+      if (EXPERIMENT_PART.test(base) && !(data.length > 8 && data[0] === 35 && data[1] === 35 && JCAMP_DATA.test(new TextDecoder("latin1").decode(data)))) {
+        if (!isJeol(data) && !isNmrPipe(data)) {
+          orphans.push(base);
+          continue;
+        }
+      }
       try {
         if (/\.mnova$/i.test(path)) {
           for (const ds of readMnova(data, base)) datasets.push(normalise(ds));
@@ -1147,7 +1178,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
           datasets.push(normalise(readNmrML(new TextDecoder().decode(data), base)));
         } else if (isNmrPipe(data)) {
           datasets.push(normalise(readNmrPipe(data, base)));
-        } else if (JCAMP_EXT.test(path) || data.length > 8 && data[0] === 35 && data[1] === 35) {
+        } else if (JCAMP_EXT.test(path) || data.length > 8 && data[0] === 35 && data[1] === 35 && JCAMP_DATA.test(new TextDecoder("latin1").decode(data))) {
           const text = new TextDecoder("latin1").decode(data);
           for (const ds of readJcamp(text, base)) datasets.push(normalise(ds));
         } else if (TEXT_EXT.test(path) && !/^(audit|title|integrals|peaklist|format)/i.test(base)) {
@@ -1157,6 +1188,10 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       } catch (e) {
         warnings.push(`${base}: ${e.message}`);
       }
+    }
+    if (orphans.length && !datasets.length) {
+      const raw = orphans.find((b) => /^(fid|ser)$/i.test(b)) || orphans.find((b) => /^(acqus|procs|procpar)$/i.test(b));
+      warnings.push(`${raw || orphans[0]}: this file is part of a Bruker or Varian/Agilent experiment and can't be read on its own. Open the whole experiment folder (the numbered folder holding acqus and fid, or the .fid folder holding procpar), or a .zip of it.`);
     }
     if (!datasets.length && !warnings.length) warnings.push("No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova), CSV/TXT.");
     return { datasets, warnings };

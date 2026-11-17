@@ -13,6 +13,12 @@ import { readMnova } from './mnova.js';
 
 const JCAMP_EXT = /\.(jdx|dx|jcamp|jcm)$/i;
 const TEXT_EXT = /\.(csv|tsv|txt|asc|xy)$/i;
+// Files that only make sense inside a Bruker / Varian experiment folder. Bruker parameter files
+// (acqu, proc, outd, ...) start with "##" like JCAMP-DX but hold no spectrum, so they must never
+// be read as JCAMP on their own.
+const EXPERIMENT_PART = /^(fid|ser|acqus?|acqu[2-8]s?|procs?|proc[2-8]s?|[12][ri]|[23][ri]{2,3}|outd|curdat2?|clevels|meta|audit[ap]?\.txt|pulseprogram|uxnmr\.(par|info)|specpar|format\.(temp|ased)|scon2?|shimvalues|title|procpar|text|log)$/i;
+const JCAMP_DATA = /##\s*(XYDATA|XYPOINTS|PEAK\s*TABLE|NTUPLES|DATA\s*TABLE)\s*=/i;
+const junk = (p) => /(^|\/)__MACOSX\//.test(p) || /(^|\/)(\._[^/]*|\.DS_Store)$/.test(p);
 
 // files: Map<path, Uint8Array>
 export async function loadFiles(files) {
@@ -33,7 +39,8 @@ export async function loadFiles(files) {
 
 // Synchronous part of loading: files are already unpacked (used directly by the macOS app,
 // which unzips natively).
-export function loadExpanded(all) {
+export function loadExpanded(input) {
+  const all = new Map([...input].filter(([p]) => !junk(p)));
   const datasets = [];
   const warnings = [];
   const used = new Set();
@@ -46,6 +53,17 @@ export function loadExpanded(all) {
     try {
       datasets.push(normalise(readBruker(sub, nameFor(dir, 'Bruker'))));
     } catch (e) { warnings.push(`${dir}: ${e.message}`); }
+    markUsed(all, dir, used);
+  }
+
+  // Processed Bruker data opened without its experiment folder (e.g. only pdata or pdata/1).
+  const procDirs = [...all.keys()].filter((p) => /(^|\/)procs$/.test(p) && !used.has(p)).map((p) => p.replace(/procs$/, ''));
+  for (const dir of procDirs.sort()) {
+    if (!all.has(dir + '1r')) continue;
+    if (all.has(dir + 'proc2s')) { warnings.push(`${dir || 'Bruker data'}: 2D experiment skipped (1D only for now)`); markUsed(all, dir, used); continue; }
+    const sub = new Map([...subset(all, dir)].map(([p, d]) => ['pdata/1/' + p, d]));
+    try { datasets.push(normalise(readBruker(sub, nameFor(dir, 'Bruker')))); }
+    catch (e) { warnings.push(`${dir}: ${e.message}`); }
     markUsed(all, dir, used);
   }
 
@@ -67,9 +85,14 @@ export function loadExpanded(all) {
     for (const f of ['acqu.par', 'data.1d', 'spectrum.1d']) used.add(dir + f);
   }
 
+  const orphans = [];
   for (const [path, data] of all) {
     if (used.has(path)) continue;
     const base = path.split('/').pop();
+    if (EXPERIMENT_PART.test(base) && !(data.length > 8 && data[0] === 0x23 && data[1] === 0x23 && JCAMP_DATA.test(new TextDecoder('latin1').decode(data)))) {
+      // JEOL and NMRPipe files can carry any name; everything else here is a piece of a folder.
+      if (!isJeol(data) && !isNmrPipe(data)) { orphans.push(base); continue; }
+    }
     try {
       if (/\.mnova$/i.test(path)) {
         for (const ds of readMnova(data, base)) datasets.push(normalise(ds));
@@ -79,7 +102,7 @@ export function loadExpanded(all) {
         datasets.push(normalise(readNmrML(new TextDecoder().decode(data), base)));
       } else if (isNmrPipe(data)) {
         datasets.push(normalise(readNmrPipe(data, base)));
-      } else if (JCAMP_EXT.test(path) || (data.length > 8 && data[0] === 0x23 && data[1] === 0x23)) {
+      } else if (JCAMP_EXT.test(path) || (data.length > 8 && data[0] === 0x23 && data[1] === 0x23 && JCAMP_DATA.test(new TextDecoder('latin1').decode(data)))) {
         const text = new TextDecoder('latin1').decode(data);
         for (const ds of readJcamp(text, base)) datasets.push(normalise(ds));
       } else if (TEXT_EXT.test(path) && !/^(audit|title|integrals|peaklist|format)/i.test(base)) {
@@ -87,6 +110,11 @@ export function loadExpanded(all) {
         if (ds) datasets.push(normalise(ds));
       }
     } catch (e) { warnings.push(`${base}: ${e.message}`); }
+  }
+  if (orphans.length && !datasets.length) {
+    const raw = orphans.find((b) => /^(fid|ser)$/i.test(b)) || orphans.find((b) => /^(acqus|procs|procpar)$/i.test(b));
+    warnings.push(`${raw || orphans[0]}: this file is part of a Bruker or Varian/Agilent experiment and can't be read on its own. ` +
+      'Open the whole experiment folder (the numbered folder holding acqus and fid, or the .fid folder holding procpar), or a .zip of it.');
   }
   if (!datasets.length && !warnings.length) warnings.push('No supported NMR data found. Supported: Bruker, JEOL (.jdf), Varian/Agilent, Magritek Spinsolve, NMRPipe, nmrML, JCAMP-DX, MestReNova (.mnova), CSV/TXT.');
   return { datasets, warnings };

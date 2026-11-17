@@ -38,12 +38,23 @@ function toast(t) {
   clearTimeout(toast._t); toast._t = setTimeout(() => { el.hidden = true; }, 2200);
 }
 
+// A browser only shares the files that were picked, so a lone fid/acqus can't reach the rest
+// of its experiment folder. Say so, and offer the folder picker in one click.
+function warnHtml(w) {
+  const m = w.match(/^([^:]+): this file is part of a Bruker or Varian\/Agilent experiment/);
+  if (!m) return esc(w);
+  return `<b>${esc(m[1])}</b> is one file from a Bruker or Varian/Agilent experiment, and your browser only shares the files you pick. ` +
+    'Choose the whole experiment folder (the numbered folder holding <code>acqus</code> and <code>fid</code>, or the <code>.fid</code> folder holding <code>procpar</code>), or drag that folder onto the page.' +
+    '<br><button class="btn warn-open" type="button" data-open-dir>Open experiment folder…</button>';
+}
+document.addEventListener('click', (e) => { if (e.target.closest('[data-open-dir]')) $('dirInput').click(); });
+
 async function addFiles(map, select = true) {
   setStatus('Reading…');
   try {
     const { datasets, warnings } = await NMR.loadFiles(map);
     const w = $('warns');
-    w.hidden = !warnings.length; w.innerHTML = warnings.map(esc).join('<br>');
+    w.hidden = !warnings.length; w.innerHTML = warnings.map(warnHtml).join('<br>');
     const first = state.items.length;
     for (const ds of datasets) {
       const session = NMR.createSession(ds);

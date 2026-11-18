@@ -12,3 +12,4 @@ export { suggest, candidateGroups, journalReport, formulaInfo, matchCompounds, f
 export { SHIFT_GROUPS, ELEMENTS, SOLVENTS, IMPURITIES, COUPLINGS, COMPOUNDS, searchReference, findSolvent } from './database.js';
 export { POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea } from './polymer.js';
 export { EXPORTS, exportAs, plotSVG, toJcamp, toNmrML, spectrumXY, peakTable, integralTable } from './export.js';
+export { STACK_COLORS, stackLayout, stackSVG, traceScales, visibleMax, solventRanges, traceName } from './stack.js';

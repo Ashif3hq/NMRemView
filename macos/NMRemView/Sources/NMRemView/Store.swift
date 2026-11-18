@@ -17,6 +17,9 @@ final class Store: ObservableObject {
     @Published var polymerPick: PolymerPick?
     /// Regions outlined on the plot (polymer counting and end-group signals).
     @Published var plotMarks: [PlotMark] = []
+    /// Overlay / stack settings and the spectra ticked for it (the selected one is always shown).
+    @Published var compare = CompareSettings()
+    @Published var compareIDs: Set<String> = []
     @Published private var undoStacks: [String: [[String: Any]]] = [:]
     @Published private var redoStacks: [String: [[String: Any]]] = [:]
     private var pickSerial = 0
@@ -112,6 +115,50 @@ final class Store: ObservableObject {
         selection = id
         prompt = nil
         if results[id] == nil { apply([:]) }
+        if compare.mode != .single { compareIDs.insert(id); runCompared() }
+    }
+
+    // MARK: Overlay / stack
+
+    /// Colour slot of a spectrum: its place in the sidebar, so it keeps its colour.
+    func colorIndex(_ id: String) -> Int { datasets.firstIndex { $0.id == id } ?? 0 }
+
+    /// Datasets that can join the overlay: same nucleus as the selected one.
+    func canCompare(_ ds: DatasetInfo) -> Bool {
+        guard let cur = datasets.first(where: { $0.id == selection }) else { return false }
+        return ds.nucleus == cur.nucleus
+    }
+
+    func isCompared(_ ds: DatasetInfo) -> Bool { ds.id == selection || (compareIDs.contains(ds.id) && canCompare(ds)) }
+
+    func setCompared(_ ds: DatasetInfo, _ on: Bool) {
+        if on { compareIDs.insert(ds.id) } else { compareIDs.remove(ds.id) }
+        runCompared()
+    }
+
+    func setCompareMode(_ m: CompareMode) {
+        compare.mode = m
+        guard m != .single, let id = selection else { return }
+        compareIDs.insert(id)
+        // First time in: show every spectrum of the same nucleus.
+        let same = datasets.filter(canCompare)
+        if !same.contains(where: { $0.id != id && compareIDs.contains($0.id) }) { same.forEach { compareIDs.insert($0.id) } }
+        runCompared()
+    }
+
+    /// Processes ticked spectra that have not been opened yet.
+    private func runCompared() {
+        guard let core else { return }
+        for ds in datasets where isCompared(ds) && results[ds.id] == nil {
+            if let r = try? core.run(id: ds.id) { results[ds.id] = r }
+        }
+    }
+
+    /// Spectra drawn together, bottom trace first; empty in Single mode or with fewer than two.
+    var compareTraces: [StackTrace] {
+        guard compare.mode != .single else { return [] }
+        let list = datasets.filter(isCompared).compactMap { ds in results[ds.id].map { StackTrace(result: $0, colorIndex: colorIndex(ds.id), active: ds.id == selection) } }
+        return list.count > 1 ? list : []
     }
 
     /// Sends parameter changes to the core and refreshes the current result.
@@ -319,9 +366,20 @@ final class Store: ObservableObject {
 
     // MARK: Export
 
-    func exportText(_ kind: String, range: ClosedRange<Double>? = nil) -> String {
+    func exportText(_ kind: String, range: ClosedRange<Double>? = nil, yScale: Double = 1) -> String {
         guard let core, let id = selection else { return "" }
-        do { return try core.exportText(id: id, kind: kind, range: range) }
+        let traces = compareTraces
+        do {
+            if kind == "svg", !traces.isEmpty {
+                var o: [String: Any] = [
+                    "mode": compare.mode.core, "gap": compare.gap, "scale": compare.commonScale ? "common" : "each", "yScale": yScale,
+                    "names": traces.map(\.result.title), "colorIndex": traces.map(\.colorIndex),
+                ]
+                if let range { o["hi"] = range.upperBound; o["lo"] = range.lowerBound }
+                return try core.stackSVG(ids: traces.map(\.result.id), options: o)
+            }
+            return try core.exportText(id: id, kind: kind, range: range)
+        }
         catch { errorMessage = error.localizedDescription; return "" }
     }
 
@@ -348,7 +406,8 @@ final class Store: ObservableObject {
 
     var fileBase: String {
         let t = current?.title ?? "spectrum"
-        return String(t.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." ? $0 : "_" }.prefix(60))
+        let base = String(t.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "." ? $0 : "_" }.prefix(60))
+        return compareTraces.isEmpty ? base : base + "-" + compare.mode.core
     }
 
     func polymer(_ config: [String: Any]) -> PolymerResult? {

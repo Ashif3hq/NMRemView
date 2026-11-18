@@ -63,6 +63,27 @@ for (const c of cases) {
   console.log(bad.length ? 'FAIL' : 'ok  ', 'exports round-trip', bad.join(' '));
   if (bad.length) fail++;
 }
+// Overlay / stack: layout maths and the stacked SVG figure.
+{
+  const bad = [];
+  const lay = N.stackLayout(3, 300, 'stack', 1);
+  if (Math.abs(lay.step - 100) > 1e-9 || Math.abs(lay.height - 100) > 1e-9 || lay.offsets.join() !== '0,100,200') bad.push('stack gap 1');
+  const ov = N.stackLayout(3, 300, 'overlay', 0.6);
+  if (ov.height !== 300 || ov.offsets.some((o) => o !== 0)) bad.push('overlay');
+  const res = [];
+  for (const f of ['ibuprofen-1h.zip', 'aspirin-1h.zip']) {
+    const { datasets } = await N.loadFiles(new Map([[f, new Uint8Array(fs.readFileSync('web/samples/' + f))]]));
+    res.push(N.createSession(datasets[0]).run());
+  }
+  const sc = N.traceScales(res, 10, 0, 'common');
+  if (sc[0] !== sc[1]) bad.push('common scale');
+  for (const mode of ['stack', 'overlay']) {
+    const svg = N.stackSVG(res, { mode, names: ['Ibuprofen', 'Aspirin & co'] });
+    if ((svg.match(/<polyline/g) || []).length !== 2 || !svg.includes('Aspirin &amp; co')) bad.push('svg ' + mode);
+  }
+  console.log(bad.length ? 'FAIL' : 'ok  ', 'overlay / stack', bad.join('; '));
+  if (bad.length) fail++;
+}
 // Partial Bruker selections: a pdata folder alone loads its processed spectrum; a lone fid or
 // parameter file gives one clear hint, never "No 1D NMR data found in JCAMP file".
 {

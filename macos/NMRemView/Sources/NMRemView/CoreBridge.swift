@@ -266,6 +266,13 @@ final class CoreBridge {
         try call("exportText", [id, kind, range.map { $0.upperBound as Any } ?? NSNull(), range.map { $0.lowerBound as Any } ?? NSNull()])
     }
 
+    /// Overlaid or stacked spectra as SVG (ids bottom trace first).
+    func stackSVG(ids: [String], options: [String: Any]) throws -> String {
+        let idj = String(data: try JSONSerialization.data(withJSONObject: ids), encoding: .utf8) ?? "[]"
+        let oj = String(data: try JSONSerialization.data(withJSONObject: options), encoding: .utf8) ?? "{}"
+        return try call("stackSVG", [idj, oj])
+    }
+
     func search(_ query: String) throws -> SearchResult {
         try decode(try call("search", [query]))
     }

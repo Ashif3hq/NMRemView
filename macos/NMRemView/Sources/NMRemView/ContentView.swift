@@ -18,6 +18,14 @@ struct ContentView: View {
                 Section("Spectra") {
                     ForEach(store.datasets) { ds in
                         HStack(spacing: 8) {
+                            if store.compare.mode != .single {
+                                Toggle("", isOn: Binding(get: { store.isCompared(ds) }, set: { store.setCompared(ds, $0) }))
+                                    .labelsHidden().toggleStyle(.checkbox)
+                                    .tint(StackPalette.color(store.colorIndex(ds.id)))
+                                    .disabled(ds.id == store.selection || !store.canCompare(ds))
+                                    .help(ds.id == store.selection ? "The selected spectrum is always shown" : store.canCompare(ds) ? "Show in the overlay or stack" : "Only spectra of the same nucleus can be compared")
+                                RoundedRectangle(cornerRadius: 1.5).fill(StackPalette.color(store.colorIndex(ds.id))).frame(width: 3, height: 26)
+                            }
                             Text(ds.nucleus)
                                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                                 .padding(.horizontal, 5).padding(.vertical, 1)
@@ -45,6 +53,8 @@ struct ContentView: View {
                         ToolBarRow(result: r, range: $plotRange, exportPlot: { exportPNG(r) }, exportPDF: { exportPDF(r) })
                         Divider()
                         ProcessingBar(result: r)
+                        Divider()
+                        HStack { CompareBar(); Spacer() }.padding(.horizontal, 8).padding(.vertical, 5)
                         Divider()
                         plot(r)
                             .frame(minWidth: 560, minHeight: 380)
@@ -114,7 +124,8 @@ extension ContentView {
                      onClick: { ppm, pt, yFrac, w, perPt, hit in store.handleClick(ppm: ppm, point: pt, yFrac: yFrac, hit: hit, plotWidth: w, ppmPerPoint: perPt) },
                      onMenu: { t, ppm, pt, yFrac, w, perPt, hit in store.handleClick(ppm: ppm, point: pt, yFrac: yFrac, hit: hit, plotWidth: w, ppmPerPoint: perPt, using: t) },
                      onPolymerPick: { s, rep in store.finishPick(s, repeatUnit: rep) },
-                     labelText: { store.labels(for: $0) })
+                     labelText: { store.labels(for: $0) },
+                     traces: store.compareTraces, compare: store.compare)
     }
 
     /// Renders the current view of the plot at print size and saves it as PNG.

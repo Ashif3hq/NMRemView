@@ -1,5 +1,7 @@
 // Canvas spectrum viewer: reversed ppm axis, peak labels with leaders, integral
-// brackets and curves, reference-range bands, compound stick overlays, zoom/pan.
+// brackets and curves, reference-range bands, compound stick overlays, zoom/pan, and
+// several spectra overlaid or stacked (the active one keeps its labels and integrals).
+import { stackLayout, traceScales } from './core/stack.js';
 
 export class SpectrumViewer {
   constructor(canvas, opts = {}) {
@@ -22,6 +24,9 @@ export class SpectrumViewer {
     this.hoverPpm = null;
     this.annotations = [];
     this.picks = [];
+    // Overlay / stack: { mode: 'single' | 'overlay' | 'stack', gap, scale: 'each' | 'common',
+    //   traces: [{ result, name, color (index into the series palette), active }] }.
+    this.compare = null;
     this._boxes = [];
     this._bind();
     new ResizeObserver(() => this.draw()).observe(canvas.parentElement);
@@ -81,6 +86,7 @@ export class SpectrumViewer {
       integral: g('--integral'), band: g('--band'), bandText: g('--band-ink'), hl: g('--hl'),
       stick: g('--stick'), bg: g('--plot'), solvent: g('--solvent'), select: g('--select'),
       accent: g('--accent'), note: g('--note'), surface: g('--surface'),
+      series: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => g('--s' + i)),
     };
   }
 
@@ -124,8 +130,20 @@ export class SpectrumViewer {
     if (!vmax) for (let i = i0; i <= i1; i++) vmax = Math.max(vmax, y[i]);
     vmax = (vmax || 1) / this.yScale;
     const plotH = L.axisY - L.top;
-    const base = L.axisY - 6;
-    const yOf = (v) => base - (v / vmax) * (plotH - 10);
+    let base = L.axisY - 6;
+    let yOf = (v) => base - (v / vmax) * (plotH - 10);
+    let curveH = plotH;
+    // Overlay / stack: each trace gets its own baseline and scale; the active one's are used
+    // for everything drawn on top of it (labels, integrals, notes).
+    const cmp = this.compareTraces();
+    let traceY = null;
+    if (cmp) {
+      const lay = stackLayout(cmp.length, plotH - 10, this.compare.mode, this.compare.gap);
+      const scales = traceScales(cmp.map((t) => t.result), this.view.hi, this.view.lo, this.compare.scale).map((v) => v / this.yScale);
+      traceY = cmp.map((t, k) => { const b = L.axisY - 6 - lay.offsets[k]; return { base: b, yOf: (v) => b - (v / scales[k]) * lay.height }; });
+      const a = Math.max(0, cmp.findIndex((t) => t.active));
+      base = traceY[a].base; yOf = traceY[a].yOf; curveH = lay.height;
+    }
     this._yOf = yOf; this._L = L;
 
     // Bands from reference search
@@ -169,30 +187,17 @@ export class SpectrumViewer {
       ctx.fillRect(x1, L.top, x2 - x1, L.axisY - L.top);
     }
 
-    // Trace: min/max decimation per pixel column.
+    // Trace(s): min/max decimation per pixel column.
     ctx.save();
     ctx.beginPath(); ctx.rect(L.left, L.top - 8, L.right - L.left, L.axisY - L.top + 8); ctx.clip();
-    ctx.strokeStyle = C.trace; ctx.lineWidth = 1.15; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    const pxPerPt = (L.right - L.left) / Math.max(1, i1 - i0);
-    if (pxPerPt >= 1) {
-      for (let i = i0; i <= i1; i++) {
-        const X = this.xOf(s.ppmStart + i * step, L), Y = yOf(y[i]);
-        i === i0 ? ctx.moveTo(X, Y) : ctx.lineTo(X, Y);
+    if (cmp) {
+      // Others first, the active spectrum last so it stays on top in an overlay.
+      const order = cmp.map((t, k) => k).sort((p, q) => cmp[p].active - cmp[q].active);
+      for (const k of order) {
+        const t = cmp[k];
+        this.drawTrace(t.result.spectrum, traceY[k].yOf, L, C.series[t.color % C.series.length] || C.trace, t.active ? 1.3 : 1);
       }
-    } else {
-      const cols = Math.ceil(L.right - L.left);
-      let first = true;
-      for (let c = 0; c < cols; c++) {
-        const a = Math.floor(i0 + (c / cols) * (i1 - i0)), b = Math.floor(i0 + ((c + 1) / cols) * (i1 - i0));
-        let mn = Infinity, mx = -Infinity;
-        for (let i = a; i <= b && i < n; i++) { if (y[i] < mn) mn = y[i]; if (y[i] > mx) mx = y[i]; }
-        const X = L.left + c + 0.5;
-        if (first) { ctx.moveTo(X, yOf(mn)); first = false; } else ctx.lineTo(X, yOf(mn));
-        ctx.lineTo(X, yOf(mx));
-      }
-    }
-    ctx.stroke();
+    } else this.drawTrace(s, yOf, L, C.trace, 1.15);
 
     // Integral curves
     const sigs = (this.result.analysis.multiplets || []).filter((m) => (!m.minor || m.manual || m.reference) && !m.excluded);
@@ -202,7 +207,7 @@ export class SpectrumViewer {
       const maxArea = Math.max(...sigs.map((m) => m.area), 1);
       for (const m of sigs) {
         if (m.ppmTo > this.view.hi || m.ppmFrom < this.view.lo) continue;
-        const h = Math.max(18, (m.area / maxArea) * plotH * 0.45);
+        const h = Math.max(18, (m.area / maxArea) * curveH * 0.45);
         let acc = 0;
         const tot = m.area / Math.abs(step) || 1;
         ctx.beginPath();
@@ -332,6 +337,8 @@ export class SpectrumViewer {
       this._boxes.push({ x: bx, y: by, w, h, a });
     }
 
+    if (cmp) this.drawTraceNames(cmp, traceY, L, C);
+
     // Drag selection
     if (this.drag && this.drag.x2 !== undefined) {
       ctx.fillStyle = C.select;
@@ -344,6 +351,74 @@ export class SpectrumViewer {
       ctx.beginPath(); ctx.moveTo(this.hoverX + 0.5, L.top); ctx.lineTo(this.hoverX + 0.5, L.axisY); ctx.stroke();
       ctx.setLineDash([]);
     }
+  }
+
+  /** Spectra to draw together, or null for a single spectrum. */
+  compareTraces() {
+    const c = this.compare;
+    if (!c || c.mode === 'single' || !c.traces || c.traces.length < 2) return null;
+    return c.traces;
+  }
+
+  drawTrace(s, yOf, L, color, width) {
+    const ctx = this.ctx, y = s.real, n = y.length;
+    const step = (s.ppmEnd - s.ppmStart) / (n - 1);
+    const idx = (ppm) => (ppm - s.ppmStart) / step;
+    const i0 = Math.max(0, Math.floor(idx(this.view.hi))), i1 = Math.min(n - 1, Math.ceil(idx(this.view.lo)));
+    if (i1 <= i0) return;
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    const xa = this.xOf(s.ppmStart + i0 * step, L), xb = this.xOf(s.ppmStart + i1 * step, L);
+    const pxPerPt = (xb - xa) / Math.max(1, i1 - i0);
+    if (pxPerPt >= 1) {
+      for (let i = i0; i <= i1; i++) {
+        const X = this.xOf(s.ppmStart + i * step, L), Y = yOf(y[i]);
+        i === i0 ? ctx.moveTo(X, Y) : ctx.lineTo(X, Y);
+      }
+    } else {
+      const cols = Math.max(1, Math.ceil(xb - xa));
+      let first = true;
+      for (let c = 0; c < cols; c++) {
+        const a = Math.floor(i0 + (c / cols) * (i1 - i0)), b = Math.floor(i0 + ((c + 1) / cols) * (i1 - i0));
+        let mn = Infinity, mx = -Infinity;
+        for (let i = a; i <= b && i < n; i++) { if (y[i] < mn) mn = y[i]; if (y[i] > mx) mx = y[i]; }
+        const X = xa + c + 0.5;
+        if (first) { ctx.moveTo(X, yOf(mn)); first = false; } else ctx.lineTo(X, yOf(mn));
+        ctx.lineTo(X, yOf(mx));
+      }
+    }
+    ctx.stroke();
+  }
+
+  // Stack: each name sits on its own baseline at the right. Overlay: a legend top right.
+  drawTraceNames(cmp, traceY, L, C) {
+    const ctx = this.ctx;
+    ctx.font = '600 11px ' + getComputedStyle(document.documentElement).getPropertyValue('--font-ui');
+    const col = (t) => C.series[t.color % C.series.length] || C.trace;
+    const fit = (t, w) => { let x = t; while (x.length > 4 && ctx.measureText(x).width > w) x = x.slice(0, -2); return x === t ? t : x + '…'; };
+    if (this.compare.mode === 'stack') {
+      ctx.textAlign = 'right';
+      cmp.forEach((t, k) => {
+        const txt = fit(t.name, 220);
+        const w = ctx.measureText(txt).width + 8, Y = traceY[k].base - 5;
+        ctx.globalAlpha = 0.85; ctx.fillStyle = C.bg; ctx.fillRect(L.right - w - 2, Y - 11, w + 2, 15); ctx.globalAlpha = 1;
+        ctx.fillStyle = col(t);
+        ctx.fillText((t.active ? '▸ ' : '') + txt, L.right - 4, Y);
+      });
+      ctx.textAlign = 'left';
+      return;
+    }
+    const rows = cmp.map((t) => fit(t.name, 220));
+    const w = Math.max(...rows.map((r) => ctx.measureText(r).width)) + 34, h = rows.length * 16 + 8;
+    const x = L.right - w - 4, y = L.top + 24;
+    ctx.fillStyle = C.surface; ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.92; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1; ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+    ctx.textAlign = 'left';
+    cmp.forEach((t, k) => {
+      const Y = y + 16 + k * 16;
+      ctx.fillStyle = col(t); ctx.fillRect(x + 8, Y - 5, 16, t.active ? 3 : 2);
+      ctx.fillText(rows[k], x + 30, Y);
+    });
   }
 
   _bind() {

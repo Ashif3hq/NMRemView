@@ -286,7 +286,7 @@ struct SpectrumView: View {
         }
         func colPpm(_ c: Int) -> Double { Geo.colPpm(c, result, pairs) }
         func yOf(_ v: Double) -> CGFloat { base - CGFloat(v / vmax) * height }
-        func yOf(_ v: Double, lane k: Int) -> CGFloat { lanes[k].base - CGFloat(v / lanes[k].vmax) * height }
+        func laneY(_ v: Double, _ k: Int) -> CGFloat { lanes[k].base - CGFloat(v / lanes[k].vmax) * height }
         /// Highest point within ±half ppm of a shift.
         func apex(_ ppm: Double, half: Double) -> Double {
             var m = 0.0
@@ -396,7 +396,7 @@ struct SpectrumView: View {
             plot.clip(to: Path(CGRect(x: margin, y: top - 8, width: W - 2 * margin, height: axisY - top + 8)))
             for k in traces.indices.sorted(by: { !traces[$0].active && traces[$1].active }) {
                 let t = traces[k]
-                plot.stroke(tracePath(t.result, W: W, range: range, yOf: { g.yOf($0, lane: k) }), with: .color(t.color), lineWidth: t.active ? 1.3 : 1)
+                plot.stroke(tracePath(t.result, W: W, range: range, yOf: { g.laneY($0, k) }), with: .color(t.color), lineWidth: t.active ? 1.3 : 1)
             }
             drawTraceNames(ctx, g)
         }

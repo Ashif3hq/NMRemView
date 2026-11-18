@@ -23,6 +23,8 @@
   --stick: #b0287a;
   --note: #6a3ea1;
   --solvent: #8a96a3;
+  /* Overlay / stack series, same order as STACK_COLORS in core/stack.js. */
+  --s0: #18306b; --s1: #c4561b; --s2: #0e7c86; --s3: #b0287a; --s4: #3b7d23; --s5: #6a3ea1; --s6: #8a6d00; --s7: #5d6b79;
   --chip: #e3e9ee;
   --warn: #9a6200;
   --ok: #1f7a43;
@@ -35,6 +37,7 @@
     --bg: #0f151b; --surface: #161e26; --plot: #121a21; --fg: #e3e9ef; --muted: #8e9dab; --line: #27323d; --grid: #1c252e;
     --trace: #8fb4ff; --accent: #3fb8c2; --accent-ink: #061417; --integral: #f0905a; --band: rgba(63, 184, 194, 0.13); --band-ink: #7fd6dd;
     --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --note: #c4a3f2; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
+    --s0: #8fb4ff; --s1: #f0905a; --s2: #3fb8c2; --s3: #f07ac4; --s4: #7cc95e; --s5: #c4a3f2; --s6: #e0c050; --s7: #a5b1bd;
     color-scheme: dark;
   }
 }
@@ -42,9 +45,11 @@
   --bg: #0f151b; --surface: #161e26; --plot: #121a21; --fg: #e3e9ef; --muted: #8e9dab; --line: #27323d; --grid: #1c252e;
   --trace: #8fb4ff; --accent: #3fb8c2; --accent-ink: #061417; --integral: #f0905a; --band: rgba(63, 184, 194, 0.13); --band-ink: #7fd6dd;
   --hl: rgba(240, 144, 90, 0.12); --select: rgba(143, 180, 255, 0.14); --stick: #f07ac4; --note: #c4a3f2; --solvent: #64717d; --chip: #212c36; --warn: #e0a640; --ok: #5cc98a;
+    --s0: #8fb4ff; --s1: #f0905a; --s2: #3fb8c2; --s3: #f07ac4; --s4: #7cc95e; --s5: #c4a3f2; --s6: #e0c050; --s7: #a5b1bd;
   color-scheme: dark;
 }
 html, body { height: 100%; }
+[hidden] { display: none !important; }
 body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 13px; }
 * { box-sizing: border-box; }
 button, input, select { font: inherit; color: inherit; }
@@ -77,6 +82,11 @@ select.btn { padding-right: 8px; }
 .lib-item.active { background: var(--select); }
 .nuc { font-family: var(--font-mono); font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: var(--trace); color: var(--surface); grid-row: span 2; }
 .nuc.c13 { background: var(--integral); }
+.lib-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.cmpchk { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 0 6px; cursor: pointer; }
+.cmpchk input { margin: 0; accent-color: var(--sw); cursor: pointer; }
+.cmpchk input:disabled { cursor: default; }
+.cmpchk i { display: block; width: 14px; height: 3px; border-radius: 2px; background: var(--sw); }
 .lib-item .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-item .sub { color: var(--muted); font-size: 11px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drop { margin: auto 8px 8px; border: 1.5px dashed var(--line); border-radius: 8px; padding: 12px; color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -279,6 +289,13 @@ tr.ref .nh-in { border-color: var(--accent); }
           <button class="btn small tool" id="redo" type="button" title="Redo (Ctrl/⌘ Shift Z)" aria-label="Redo">↷</button>
           <button class="btn small tool" id="exportBtn" type="button" title="Export the plot, the spectrum (JCAMP-DX, CSV, nmrML) or tables">Export ▾</button>
           <button class="btn small tool" id="helpBtn" type="button" title="Mouse and keyboard help" aria-label="Help">?</button>
+        </div>
+        <div class="tgroup" id="compareGroup" role="group" aria-label="Compare spectra">
+          <button class="btn small tool on" data-cmp-mode="single" type="button" title="Show one spectrum">Single</button>
+          <button class="btn small tool" data-cmp-mode="overlay" type="button" title="Overlay the spectra ticked in the list on one baseline">Overlay</button>
+          <button class="btn small tool" data-cmp-mode="stack" type="button" title="Stack the spectra ticked in the list one above the other">Stack</button>
+          <span class="tgroup" id="gapWrap" hidden><label for="gap">Gap</label><input type="range" id="gap" min="0" max="100" step="1"></span>
+          <button class="btn small" id="commonScale" type="button" title="Off: each spectrum fills its own height. On: all share one intensity scale, so relative heights compare" hidden>Same scale</button>
         </div>
         <div class="tgroup" id="phaseGroup">
           <label for="ph0">PH0</label><input type="range" id="ph0" min="-180" max="180" step="0.5"><span class="val" id="ph0v"></span>

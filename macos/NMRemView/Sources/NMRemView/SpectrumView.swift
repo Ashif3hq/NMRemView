@@ -2,7 +2,8 @@ import SwiftUI
 import AppKit
 
 /// Native spectrum plot: reversed ppm axis, peak labels, integral brackets, reference bands,
-/// compound overlays, hand-picked peaks, labels and notes. What a drag or click does depends on
+/// compound overlays, hand-picked peaks, labels and notes, and several spectra overlaid or
+/// stacked (the active one keeps its labels and integrals). What a drag or click does depends on
 /// the active tool; double-click fits the spectrum in Zoom and Pan.
 struct SpectrumView: View {
     let result: SpectrumResult
@@ -20,6 +21,9 @@ struct SpectrumView: View {
     /// Right-click "use as polymer repeat-unit (true) / end-group (false) signal".
     var onPolymerPick: ((Signal, Bool) -> Void)? = nil
     var labelText: ((Signal) -> String)? = nil
+    /// Spectra drawn together, bottom first; empty for a single spectrum.
+    var traces: [StackTrace] = []
+    var compare = CompareSettings()
 
     @StateObject private var mouse = PlotMouse()
     @State private var hover: CGPoint?
@@ -241,24 +245,48 @@ struct SpectrumView: View {
         let W: CGFloat, top: CGFloat, axisY: CGFloat
         let range: ClosedRange<Double>
         let pairs: Int
+        /// Baseline and intensity scale of the active spectrum, and the height one trace may use.
+        let base: CGFloat, height: CGFloat
         let vmax: Double
+        /// Overlay / stack: baseline and scale of every trace, bottom first.
+        let lanes: [(base: CGFloat, vmax: Double)]
         let result: SpectrumResult
         init(size: CGSize, range: ClosedRange<Double>, view: SpectrumView) {
-            let yScale = view.mouse.yScale
+            let yScale = max(0.2, view.mouse.yScale)
             W = size.width; top = 70; axisY = size.height - 56
             self.range = range
             result = view.result
-            let n = view.result.y.count / 2
-            pairs = n
+            pairs = view.result.y.count / 2
+            let plotH = axisY - top - 10
+            let ts = view.traces
+            if ts.count < 2 {
+                base = axisY - 6; height = plotH; lanes = []
+                vmax = Geo.maxIn(view.result, range) / yScale
+            } else {
+                // Same layout as stackLayout() in core/stack.js.
+                let n = CGFloat(ts.count)
+                let step = view.compare.mode == .stack ? CGFloat(min(1, max(0, view.compare.gap))) * plotH / n : 0
+                height = plotH - (n - 1) * step
+                let maxes = ts.map { Geo.maxIn($0.result, range) }
+                let common = maxes.max() ?? 1
+                let axis = axisY
+                lanes = ts.indices.map { k in (base: axis - 6 - CGFloat(k) * step, vmax: (view.compare.commonScale ? common : maxes[k]) / yScale) }
+                let a = ts.firstIndex { $0.active } ?? 0
+                base = lanes[a].base; vmax = lanes[a].vmax
+            }
+        }
+        static func maxIn(_ r: SpectrumResult, _ range: ClosedRange<Double>) -> Double {
+            let n = r.y.count / 2
             var m = 1e-12
-            for c in 0..<n where range.contains(Geo.colPpm(c, view.result, n)) { m = max(m, view.result.y[2 * c + 1]) }
-            vmax = m / max(0.2, yScale)
+            for c in 0..<n where range.contains(colPpm(c, r, n)) { m = max(m, r.y[2 * c + 1]) }
+            return m
         }
         static func colPpm(_ c: Int, _ r: SpectrumResult, _ pairs: Int) -> Double {
             r.ppmStart + (r.ppmEnd - r.ppmStart) * Double(c) / Double(max(1, pairs - 1))
         }
         func colPpm(_ c: Int) -> Double { Geo.colPpm(c, result, pairs) }
-        func yOf(_ v: Double) -> CGFloat { axisY - 6 - CGFloat(v / vmax) * (axisY - top - 10) }
+        func yOf(_ v: Double) -> CGFloat { base - CGFloat(v / vmax) * height }
+        func laneY(_ v: Double, _ k: Int) -> CGFloat { lanes[k].base - CGFloat(v / lanes[k].vmax) * height }
         /// Highest point within ±half ppm of a shift.
         func apex(_ ppm: Double, half: Double) -> Double {
             var m = 0.0
@@ -293,6 +321,42 @@ struct SpectrumView: View {
         return out
     }
 
+    private func tracePath(_ r: SpectrumResult, W: CGFloat, range: ClosedRange<Double>, yOf: (Double) -> CGFloat) -> Path {
+        var path = Path()
+        var started = false
+        let n = r.y.count / 2
+        for c in 0..<n {
+            let p = Geo.colPpm(c, r, n)
+            guard range.contains(p) else { continue }
+            let X = x(p, width: W, range: range)
+            let a = CGPoint(x: X, y: yOf(r.y[2 * c])), b = CGPoint(x: X, y: yOf(r.y[2 * c + 1]))
+            if !started { path.move(to: a); started = true } else { path.addLine(to: a) }
+            path.addLine(to: b)
+        }
+        return path
+    }
+
+    /// Stack: each name on its own baseline at the right. Overlay: a legend top right.
+    private func drawTraceNames(_ ctx: GraphicsContext, _ g: Geo) {
+        let right = g.W - margin - 4
+        if compare.mode == .stack {
+            for (k, t) in traces.enumerated() {
+                let name = (t.active ? "▸ " : "") + String(t.result.title.prefix(40))
+                ctx.draw(Text(name).font(.system(size: 11, weight: .semibold)).foregroundColor(t.color), at: CGPoint(x: right, y: g.lanes[k].base - 10), anchor: .trailing)
+            }
+            return
+        }
+        let w = CGFloat(traces.map { min(40, $0.result.title.count) }.max() ?? 10) * 6.8 + 36
+        let box = CGRect(x: right - w, y: g.top + 20, width: w, height: CGFloat(traces.count) * 16 + 8)
+        ctx.fill(Path(roundedRect: box, cornerRadius: 4), with: .color(Color(nsColor: .textBackgroundColor).opacity(0.92)))
+        ctx.stroke(Path(roundedRect: box, cornerRadius: 4), with: .color(.secondary.opacity(0.3)), lineWidth: 1)
+        for (k, t) in traces.enumerated() {
+            let y = box.minY + 12 + CGFloat(k) * 16
+            ctx.fill(Path(CGRect(x: box.minX + 8, y: y - 1, width: 16, height: t.active ? 3 : 2)), with: .color(t.color))
+            ctx.draw(Text(String(t.result.title.prefix(40))).font(.system(size: 11, weight: .semibold)).foregroundColor(t.color), at: CGPoint(x: box.minX + 30, y: y), anchor: .leading)
+        }
+    }
+
     private func draw(ctx: GraphicsContext, size: CGSize, range: ClosedRange<Double>) {
         let g = Geo(size: size, range: range, view: self)
         let top = g.top, axisY = g.axisY, W = g.W
@@ -324,18 +388,18 @@ struct SpectrumView: View {
         }
         ctx.stroke(axis, with: .color(.secondary), lineWidth: 1)
 
-        // Trace
-        var path = Path()
-        var started = false
-        for c in 0..<g.pairs {
-            let p = g.colPpm(c)
-            guard range.contains(p) else { continue }
-            let X = x(p, width: W, range: range)
-            let a = CGPoint(x: X, y: yOf(result.y[2 * c])), b = CGPoint(x: X, y: yOf(result.y[2 * c + 1]))
-            if !started { path.move(to: a); started = true } else { path.addLine(to: a) }
-            path.addLine(to: b)
+        // Trace(s). In an overlay the active spectrum is drawn last so it stays on top.
+        if g.lanes.isEmpty {
+            ctx.stroke(tracePath(result, W: W, range: range, yOf: yOf), with: .color(Color(red: 0.09, green: 0.19, blue: 0.42)), lineWidth: 1)
+        } else {
+            var plot = ctx
+            plot.clip(to: Path(CGRect(x: margin, y: top - 8, width: W - 2 * margin, height: axisY - top + 8)))
+            for k in traces.indices.sorted(by: { !traces[$0].active && traces[$1].active }) {
+                let t = traces[k]
+                plot.stroke(tracePath(t.result, W: W, range: range, yOf: { g.laneY($0, k) }), with: .color(t.color), lineWidth: t.active ? 1.3 : 1)
+            }
+            drawTraceNames(ctx, g)
         }
-        ctx.stroke(path, with: .color(Color(red: 0.09, green: 0.19, blue: 0.42)), lineWidth: 1)
 
         // Compound overlay sticks
         if let o = overlay {

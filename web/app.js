@@ -15,6 +15,9 @@ const SAMPLES = [
 ];
 
 const state = { items: [], current: -1, tab: 'signals', query: '', bands: new Set(), compound: null, refPick: null, hoverSig: null };
+// Overlay / stack of several spectra. Ticked items (it.cmp) of the active nucleus are drawn together.
+state.compare = { mode: 'single', gap: 0.6, scale: 'each' };
+let colorSerial = 0;
 let tabSaved;
 try { tabSaved = localStorage.getItem('nmremview.tab'); } catch (e) { /* storage unavailable */ }
 if (tabSaved) state.tab = tabSaved;
@@ -58,7 +61,7 @@ async function addFiles(map, select = true) {
     const first = state.items.length;
     for (const ds of datasets) {
       const session = NMR.createSession(ds);
-      state.items.push({ ds, session, result: null });
+      state.items.push({ ds, session, result: null, color: colorSerial++ % 8, cmp: false });
     }
     if (datasets.length && select) choose(first);
     renderLibrary();
@@ -82,6 +85,8 @@ function choose(i) {
     setStatus(`Processed in ${Math.round(performance.now() - t)} ms`);
   }
   syncOverlay(it);
+  if (state.compare.mode !== 'single') it.cmp = true;
+  syncCompare();
   viewer.setResult(it.result);
   syncControls(); renderLibrary(); renderReport(); renderTab(); updateBands();
 }
@@ -90,6 +95,7 @@ function rerun(keepView = true) {
   const it = cur(); if (!it) return;
   it.result = it.session.run();
   syncOverlay(it);
+  syncCompare();
   viewer.setResult(it.result, keepView);
   syncControls(); renderReport(); renderTab(); updateBands();
 }
@@ -98,15 +104,61 @@ let raf = 0;
 function rerunSoon() { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => rerun()); }
 
 function renderLibrary() {
+  const comparing = state.compare.mode !== 'single';
+  const act = cur();
   $('libList').innerHTML = state.items.map((it, i) => {
     const ds = it.ds;
     const c13 = /13C/.test(ds.nucleus);
-    return `<button class="lib-item ${i === state.current ? 'active' : ''}" data-i="${i}" type="button">
+    const item = `<button class="lib-item ${i === state.current ? 'active' : ''}" data-i="${i}" type="button">
       <span class="nuc ${c13 ? 'c13' : ''}">${esc(ds.nucleus)}</span>
       <span class="nm" title="${esc(ds.title)}">${esc(ds.title || ds.name)}</span>
       <span class="sub">${ds.frequency ? Math.round(ds.frequency) + ' MHz' : ''} ${esc(shortSolvent(ds.solvent))} · ${esc(ds.source)}</span>
     </button>`;
+    if (!comparing) return item;
+    const same = act && ds.nucleus === act.ds.nucleus, on = it === act || (it.cmp && same);
+    const tip = it === act ? 'The active spectrum is always shown' : same ? 'Show in the overlay or stack' : `Only ${act ? act.ds.nucleus : ''} spectra can be compared with the active one`;
+    return `<div class="lib-row">${item}<label class="cmpchk" title="${esc(tip)}" style="--sw: var(--s${it.color})">
+      <input type="checkbox" data-ci="${i}" ${on ? 'checked' : ''} ${it === act || !same ? 'disabled' : ''} aria-label="Compare ${esc(ds.title || ds.name)}"><i></i></label></div>`;
   }).join('') || '<div class="drop" style="margin:0 6px">No spectra yet.</div>';
+}
+
+// ----- Overlay / stack -----
+function compareItems() {
+  const it = cur();
+  if (!it || state.compare.mode === 'single') return [];
+  return state.items.filter((x) => (x === it || x.cmp) && x.ds.nucleus === it.ds.nucleus);
+}
+function syncCompare() {
+  const list = compareItems();
+  for (const x of list) if (!x.result) x.result = x.session.run();
+  viewer.compare = list.length > 1 ? {
+    ...state.compare,
+    traces: list.map((x) => ({ result: x.result, name: x.ds.title || x.ds.name, color: x.color, active: x === cur() })),
+  } : null;
+}
+function setCompareMode(m) {
+  const it = cur();
+  state.compare.mode = m;
+  if (m !== 'single' && it) {
+    it.cmp = true;
+    const same = state.items.filter((x) => x.ds.nucleus === it.ds.nucleus);
+    // First time in: show every spectrum of the same nucleus, the usual starting point.
+    if (!same.some((x) => x !== it && x.cmp)) for (const x of same) x.cmp = true;
+    if (same.length < 2) toast(`Open two or more ${it.ds.nucleus} spectra to ${m === 'stack' ? 'stack' : 'overlay'} them`);
+  }
+  refreshCompare();
+}
+function refreshCompare() {
+  syncCompare();
+  renderLibrary(); syncCompareControls(); viewer.draw();
+}
+function syncCompareControls() {
+  const m = state.compare.mode;
+  for (const b of document.querySelectorAll('[data-cmp-mode]')) b.classList.toggle('on', b.dataset.cmpMode === m);
+  $('gapWrap').hidden = m !== 'stack';
+  $('commonScale').hidden = m === 'single';
+  $('commonScale').classList.toggle('on', state.compare.scale === 'common');
+  $('gap').value = Math.round(state.compare.gap * 100);
 }
 function shortSolvent(s) { const f = NMR.findSolvent(s); return f ? f.id : s || ''; }
 
@@ -810,6 +862,7 @@ function showHelp() {
     ['Hover a signal', 'Shows δ, multiplicity, J, integral and label'],
     ['Z H K X I N R L T', 'Zoom, Pan, Peak +, Peak −, Integrate, ∫ = n, δ ref, Label, Note'],
     ['F · Esc', 'Fit · back to Zoom'],
+    ['Single · Overlay · Stack', 'Compare spectra: tick the ones to show in the Spectra list; the active one keeps its labels'],
     ['⌘/Ctrl Z · ⇧⌘/Ctrl Z', 'Undo · Redo'],
   ];
   showDialog('Mouse and keyboard', { html: `<div class="helpgrid">${rows.map(([k, v]) => `<kbd>${esc(k)}</kbd><span>${esc(v)}</span>`).join('')}</div>` });
@@ -841,10 +894,18 @@ function labelFor(it, m) {
   const sh = shiftOf(it);
   return (it.session.params.annotations || []).filter((a) => a.kind === 'label' && a.ppm + sh <= m.ppmFrom + 1e-6 && a.ppm + sh >= m.ppmTo - 1e-6).map((a) => a.text).join('; ');
 }
-const fileBase = (it) => (it.ds.title || it.ds.name || 'spectrum').replace(/[^\w.-]+/g, '_').slice(0, 60);
+const fileBase = (it) => (it.ds.title || it.ds.name || 'spectrum').replace(/[^\w.-]+/g, '_').slice(0, 60) + (viewer.compareTraces() ? '-' + viewer.compare.mode : '');
 
 // SVG of what is on screen, at print size.
 function currentSVG(it, w = 1600, h = 800) {
+  const c = viewer.compareTraces();
+  if (c) {
+    const { mode, gap, scale } = viewer.compare;
+    return NMR.stackSVG(c.map((t) => t.result), {
+      hi: viewer.view.hi, lo: viewer.view.lo, mode, gap, scale, yScale: viewer.yScale, width: w, height: mode === 'overlay' ? h : undefined,
+      names: c.map((t) => t.name), colors: c.map((t) => NMR.STACK_COLORS[t.color % NMR.STACK_COLORS.length]),
+    });
+  }
   return NMR.plotSVG(it.result, { hi: viewer.view.hi, lo: viewer.view.lo, width: w, height: h, labels: viewer.showLabels, integrals: viewer.showCurves });
 }
 const svgURL = (svg) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
@@ -957,6 +1018,15 @@ $('copyReport').addEventListener('click', () => {
 function selectText(el) { const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 $('tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
 $('libList').addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (b) choose(+b.dataset.i); });
+$('libList').addEventListener('change', (e) => {
+  const c = e.target.closest('[data-ci]'); if (!c) return;
+  state.items[+c.dataset.ci].cmp = c.checked;
+  refreshCompare();
+});
+for (const b of document.querySelectorAll('[data-cmp-mode]')) b.addEventListener('click', () => setCompareMode(b.dataset.cmpMode));
+$('gap').addEventListener('input', (e) => { state.compare.gap = +e.target.value / 100; refreshCompare(); });
+$('commonScale').addEventListener('click', () => { state.compare.scale = state.compare.scale === 'common' ? 'each' : 'common'; refreshCompare(); });
+syncCompareControls();
 
 // ---------- File input ----------
 async function readFileList(list) {

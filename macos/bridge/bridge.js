@@ -3,7 +3,7 @@
 import {
   loadExpanded, createSession, searchReference, SOLVENTS, IMPURITIES, COUPLINGS,
   POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea,
-  snapToPeak, findSolvent, EXPORTS, exportAs,
+  snapToPeak, findSolvent, EXPORTS, exportAs, stackSVG, STACK_COLORS,
 } from '../../core/index.js';
 
 const sessions = new Map();
@@ -146,6 +146,15 @@ globalThis.NMRBridge = {
     const alias = { peaks: 'peaks-csv', ints: 'ints-csv' };
     const opts = typeof hi === 'number' && typeof lo === 'number' && hi > lo ? { hi, lo } : {};
     return exportAs(r, alias[kind] || kind, opts);
+  },
+  // Overlaid or stacked spectra as SVG. ids: JSON array of dataset ids (bottom trace first);
+  // opts: JSON { hi, lo, mode, gap, scale, yScale, names, colorIndex: [] }.
+  stackSVG(idsJSON, optsJSON) {
+    const ids = JSON.parse(idsJSON), o = JSON.parse(optsJSON || '{}');
+    const rs = ids.map((i) => lastResults.get(i)).filter(Boolean);
+    if (!rs.length) return '';
+    const colors = (o.colorIndex || []).map((k) => STACK_COLORS[k % STACK_COLORS.length]);
+    return stackSVG(rs, { ...o, colors: colors.length === rs.length ? colors : undefined });
   },
   search(query) {
     const r = searchReference(query);

@@ -37,6 +37,13 @@ or Shift-drag to pan, double-click to fit, right-click a signal for a menu (zoom
 remove peaks, set its integral, label it, reference it, use it for the polymer calculation, copy
 it for a report), and hover a signal to see δ, multiplicity, J, integral and label.
 
+Compare spectra: switch the plot from Single to Overlay or Stack and tick the spectra to show in
+the Spectra list (same nucleus as the active one; ticking starts with all of them). Overlay puts
+every trace on one baseline with a legend; Stack lifts each one above the last, with a Gap slider.
+Same scale keeps true relative intensities instead of filling each trace's height. The active
+spectrum keeps its peak labels, integrals and notes, and Export (SVG, PNG, Mac PDF) saves the
+stacked or overlaid figure. Useful for reaction monitoring, polymer series and crude-vs-pure checks.
+
 Export for other software: the spectrum as JCAMP-DX (MestReNova, TopSpin, ACD/Labs), CSV/TSV
 (Origin, Excel, any plotting tool) or nmrML; the plot as SVG, high-resolution PNG or (Mac) PDF;
 peak and integral tables as CSV or TSV that paste straight into Excel.

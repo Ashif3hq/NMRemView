@@ -1,5 +1,5 @@
 // NMRemView processing core: public API shared by the web trial and the macOS app.
-export { loadFiles, loadExpanded, normalise } from './loader.js';
+export { loadFiles, loadExpanded, expandFiles, normalise } from './loader.js';
 export { readJcamp } from './jcamp.js';
 export { readBruker } from './bruker.js';
 export { readVarian } from './varian.js';
@@ -12,4 +12,6 @@ export { suggest, candidateGroups, journalReport, formulaInfo, matchCompounds, f
 export { SHIFT_GROUPS, ELEMENTS, SOLVENTS, IMPURITIES, COUPLINGS, COMPOUNDS, searchReference, findSolvent } from './database.js';
 export { POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea } from './polymer.js';
 export { EXPORTS, exportAs, plotSVG, toJcamp, toNmrML, spectrumXY, peakTable, integralTable } from './export.js';
+export { siPage, acsDataString } from './si.js';
+export { buildProject, openProject, isProject, encodeSource, sessionState, toBase64, fromBase64, PROJECT_EXT } from './project.js';
 export { STACK_COLORS, stackLayout, stackSVG, traceScales, visibleMax, solventRanges, traceName } from './stack.js';

@@ -44,6 +44,18 @@ Same scale keeps true relative intensities instead of filling each trace's heigh
 spectrum keeps its peak labels, integrals and notes, and Export (SVG, PNG, Mac PDF) saves the
 stacked or overlaid figure. Useful for reaction monitoring, polymer series and crude-vs-pure checks.
 
+Save your work: **Save project** (web) or **File → Save Project…** (⌘S, Mac) writes one
+`.nmrview` file on your own computer. There is no account and no server. The file holds a copy of
+the raw data plus everything you did to each spectrum (phase, referencing, peaks, integrals, labels,
+notes, the overlay / stack view), so it reopens anywhere, in the web app or the Mac app, even if the
+original folder moved. Open it with Open NMR data. The web app also keeps an autosaved draft in
+your browser and offers to restore it next time.
+
+Supporting Information in one click: **SI page…** (web, next to the report) or **Export → SI page**
+(Mac) builds a printable page with the ACS-style data string, e.g. ¹H NMR (600 MHz, CDCl₃) δ 7.25
+(d, *J* = 8.0 Hz, 2H), …, and the figure for each spectrum (all spectra in the overlay / stack).
+Print it to PDF, or copy the data string formatted for Word.
+
 Export for other software: the spectrum as JCAMP-DX (MestReNova, TopSpin, ACD/Labs), CSV/TSV
 (Origin, Excel, any plotting tool) or nmrML; the plot as SVG, high-resolution PNG or (Mac) PDF;
 peak and integral tables as CSV or TSV that paste straight into Excel.

@@ -18,6 +18,16 @@ struct OpenResult: Codable {
     let warnings: [String]
 }
 
+/// A reopened .nmrview project.
+struct ProjectOpenResult: Codable {
+    struct Compare: Codable { let mode: String?; let gap: Double?; let scale: String? }
+    let datasets: [DatasetInfo]
+    let warnings: [String]
+    let current: Int
+    let compare: Compare?
+    let cmp: [String]
+}
+
 struct Peak: Codable, Hashable {
     let ppm: Double
     let height: Double
@@ -238,6 +248,22 @@ final class CoreBridge {
         let payload = files.mapValues { $0.base64EncodedString() }
         let json = String(data: try JSONSerialization.data(withJSONObject: payload), encoding: .utf8) ?? "{}"
         return try decode(try call("open", [json]))
+    }
+
+    /// Project text (.nmrview) for the given datasets and view.
+    func saveProject(meta: [String: Any]) throws -> String {
+        let json = String(data: try JSONSerialization.data(withJSONObject: meta), encoding: .utf8) ?? "{}"
+        return try call("saveProject", [json])
+    }
+
+    func openProject(text: String) throws -> ProjectOpenResult {
+        try decode(try call("openProject", [text]))
+    }
+
+    /// SI page (HTML) for datasets that have been run; the range applies to the first one.
+    func siPage(ids: [String], range: ClosedRange<Double>?) throws -> String {
+        let json = String(data: try JSONSerialization.data(withJSONObject: ids), encoding: .utf8) ?? "[]"
+        return try call("siPage", [json, range.map { $0.upperBound as Any } ?? NSNull(), range.map { $0.lowerBound as Any } ?? NSNull()])
     }
 
     func run(id: String, changes: [String: Any] = [:], columns: Int = 4096) throws -> SpectrumResult {

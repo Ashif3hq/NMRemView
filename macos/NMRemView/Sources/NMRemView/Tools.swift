@@ -154,6 +154,12 @@ struct ToolBarRow: View {
                     Button("Plot as PDF (vector)…", action: exportPDF)
                     ForEach(store.exportFormats.filter { $0.group == "Image" }) { f in Button(f.label + "…") { store.saveExport(f, range: range) } }
                 }
+                Section("Supporting Information") {
+                    ForEach(store.exportFormats.filter { $0.group == "SI" && $0.id == "si-html" }) { f in
+                        Button("SI page: ACS data + figure (opens in browser, print to PDF)…") { store.saveExport(f, range: range) }
+                    }
+                    Button("Copy ACS data string (formatted for Word)") { store.copyACS() }
+                }
                 ForEach(["Spectrum", "Tables"], id: \.self) { g in
                     Section(g) {
                         ForEach(store.exportFormats.filter { $0.group == g }) { f in Button(f.label + "…") { store.saveExport(f, range: range) } }

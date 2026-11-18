@@ -180,18 +180,28 @@ export function suggest(spec, analysis, opts = {}) {
 }
 
 // "1H NMR (400 MHz, CDCl3) δ 7.26 (d, J = 8.0 Hz, 2H), ..." in the usual journal style.
-export function journalReport(spec, signals) {
-  const nucleus = /13C/.test(spec.nucleus) ? '13C' : '1H';
+// ACS-style NMR data string, e.g. "¹H NMR (600 MHz, CDCl₃) δ 7.25 (d, J = 8.0 Hz, 2H), …".
+// html: true gives the SI form with <sup>, <sub> and italic J.
+export function journalReport(spec, signals, opts = {}) {
+  const html = !!opts.html;
+  const c13 = /13C/.test(spec.nucleus);
   const solvent = findSolvent(spec.solvent);
-  const sup = (t) => t.replace(/\d/g, (d) => '⁰¹²³⁴⁵⁶⁷⁸⁹'[d]);
+  const sup = (t) => (html ? `<sup>${t}</sup>` : t.replace(/\d/g, (d) => '⁰¹²³⁴⁵⁶⁷⁸⁹'[d]));
+  const subDigits = (t) => (html ? t.replace(/\d+/g, (d) => `<sub>${d}</sub>`) : t.replace(/\d/g, (d) => '₀₁₂₃₄₅₆₇₈₉'[d]));
+  const esc = (t) => (html ? String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) : String(t));
   const iso = String(spec.nucleus || '1H').match(/^(\d+)([A-Za-z]+)$/);
-  const head = `${iso ? sup(iso[1]) + iso[2] : spec.nucleus} NMR (${Math.round(spec.frequency || 0)} MHz, ${solvent ? solvent.id : spec.solvent || 'solvent'}) δ `;
+  const nuc = iso ? sup(iso[1]) + iso[2] : esc(spec.nucleus);
+  // ¹³C spectra are reported as proton-decoupled, ¹³C{¹H}.
+  const label = c13 ? `${nuc}{${sup('1')}H}` : nuc;
+  const solv = solvent ? subDigits(esc(solvent.id)) : esc(spec.solvent || 'solvent');
+  const head = `${label} NMR (${Math.round(spec.frequency || 0)} MHz, ${solv}) δ `;
   const list = signals.filter((s) => !s.minor && !(s.flag && s.flag.kind === 'solvent')).sort((a, b) => b.ppm - a.ppm);
-  if (nucleus === '13C') return head + list.map((s) => s.ppm.toFixed(1)).join(', ') + '.';
+  if (c13) return head + list.map((s) => s.ppm.toFixed(1)).join(', ') + '.';
+  const J = html ? '<i>J</i>' : 'J';
   return head + list.map((s) => {
-    const shift = s.multiplicity === 'm' ? `${s.ppmFrom.toFixed(2)} – ${s.ppmTo.toFixed(2)}` : s.ppm.toFixed(2);
-    const J = s.J.length ? `, J = ${s.J.map((j) => j.toFixed(1)).join(', ')} Hz` : '';
-    return `${shift} (${s.multiplicity}${J}, ${Math.max(1, Math.round(s.nH || 0))}H)`;
+    const shift = s.multiplicity === 'm' ? `${s.ppmFrom.toFixed(2)}–${s.ppmTo.toFixed(2)}` : s.ppm.toFixed(2);
+    const j = s.J.length ? `, ${J} = ${s.J.map((x) => x.toFixed(1)).join(', ')} Hz` : '';
+    return `${shift} (${s.multiplicity}${j}, ${Math.max(1, Math.round(s.nH || 0))}H)`;
   }).join(', ') + '.';
 }
 

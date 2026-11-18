@@ -31,8 +31,13 @@ struct NMRemViewApp: App {
                 Button("Redo") { store.redo() }.keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!store.canRedo)
             }
             CommandGroup(replacing: .newItem) {
-                Button("Open NMR Data…") { store.presentOpenPanel() }
+                Button("Open NMR Data or Project…") { store.presentOpenPanel() }
                     .keyboardShortcut("o")
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("Save Project…") { store.saveProject() }
+                    .keyboardShortcut("s")
+                    .disabled(store.datasets.isEmpty)
             }
         }
     }

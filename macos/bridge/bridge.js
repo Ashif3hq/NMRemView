@@ -4,9 +4,14 @@ import {
   loadExpanded, createSession, searchReference, SOLVENTS, IMPURITIES, COUPLINGS,
   POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea,
   snapToPeak, findSolvent, EXPORTS, exportAs, stackSVG, STACK_COLORS,
+  buildProject, openProject, siPage, acsDataString,
 } from '../../core/index.js';
 
 const sessions = new Map();
+// Opened file sets as { path: base64 } and, per dataset id, which set and position it came from,
+// so a project can carry the raw data.
+const sources = [];
+const sourceOf = new Map();
 const lastResults = new Map();
 
 function fromBase64(b64) {
@@ -72,8 +77,10 @@ globalThis.NMRBridge = {
     const obj = JSON.parse(filesJSON);
     const map = new Map(Object.entries(obj).map(([k, v]) => [k, fromBase64(v)]));
     const { datasets, warnings } = loadExpanded(map);
-    const list = datasets.map((ds) => {
+    const src = sources.push(obj) - 1;
+    const list = datasets.map((ds, k) => {
       sessions.set(ds.id, createSession(ds));
+      sourceOf.set(ds.id, { src, index: k });
       return { id: ds.id, title: ds.title, nucleus: ds.nucleus, frequency: ds.frequency || 0, solvent: ds.solvent || '', source: ds.source };
     });
     return JSON.stringify({ datasets: list, warnings });
@@ -86,7 +93,42 @@ globalThis.NMRBridge = {
     lastResults.set(id, r);
     return JSON.stringify(summarise(id, r, cols));
   },
-  close(id) { sessions.delete(id); lastResults.delete(id); },
+  close(id) { sessions.delete(id); lastResults.delete(id); sourceOf.delete(id); },
+  // meta: JSON { ids: [], current: index, compare: { mode, gap, scale }, cmp: [ids] } -> project text.
+  saveProject(metaJSON) {
+    const m = JSON.parse(metaJSON);
+    const cmp = new Set(m.cmp || []);
+    const items = m.ids.filter((id) => sessions.has(id) && sourceOf.has(id)).map((id, k) => {
+      const s = sessions.get(id), o = sourceOf.get(id);
+      return { source: o.src, index: o.index, name: s.dataset.name, title: s.dataset.title, params: s.params, cmp: cmp.has(id), color: k % 8 };
+    });
+    return buildProject(sources, items, { current: m.current || 0, compare: m.compare }, 'NMRemView for Mac');
+  },
+  // Project text -> JSON { datasets, warnings, current, compare, cmp: [ids] }.
+  openProject(text) {
+    const p = openProject(text);
+    const base = sources.length;
+    sources.push(...p.sources);
+    const datasets = [], cmp = [];
+    for (const e of p.entries) {
+      sessions.set(e.ds.id, e.session);
+      sourceOf.set(e.ds.id, { src: base + e.source, index: e.item.index });
+      if (e.item.cmp) cmp.push(e.ds.id);
+      const ds = e.ds;
+      datasets.push({ id: ds.id, title: ds.title, nucleus: ds.nucleus, frequency: ds.frequency || 0, solvent: ds.solvent || '', source: ds.source });
+    }
+    return JSON.stringify({ datasets, warnings: p.warnings, current: p.view.current || 0, compare: p.view.compare || null, cmp });
+  },
+  // SI page for several datasets (each must have been run). Optional hi/lo apply to the first.
+  siPage(idsJSON, hi, lo) {
+    const ids = JSON.parse(idsJSON);
+    const entries = ids.map((id, k) => {
+      const r = lastResults.get(id);
+      return r && { result: r, name: r.spectrum.title, ...(k === 0 && typeof hi === 'number' && typeof lo === 'number' && hi > lo ? { hi, lo } : {}) };
+    }).filter(Boolean);
+    return siPage(entries);
+  },
+  acs(id, html) { const r = lastResults.get(id); return r ? acsDataString(r, { html: !!html }) : ''; },
   polymerLibrary() {
     return JSON.stringify({
       polymers: POLYMERS.map((p) => ({ id: p.id, name: p.name, unit: p.unit, m0: p.m0, signalLabel: p.signal.label, from: p.signal.from, to: p.signal.to, nH: p.signal.nH, micro: p.micro || '' })),

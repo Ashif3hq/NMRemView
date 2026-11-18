@@ -22,6 +22,12 @@ const junk = (p) => /(^|\/)__MACOSX\//.test(p) || /(^|\/)(\._[^/]*|\.DS_Store)$/
 
 // files: Map<path, Uint8Array>
 export async function loadFiles(files) {
+  return loadExpanded(await expandFiles(files));
+}
+
+// Unpacks .zip archives (one level of nesting) into one path -> bytes map. Project files keep
+// this expanded form, so the Mac app (which has no async unzip) can reopen web projects.
+export async function expandFiles(files) {
   const all = new Map();
   for (const [path, data] of files) {
     if (/\.zip$/i.test(path)) {
@@ -34,7 +40,7 @@ export async function loadFiles(files) {
       }
     } else all.set(path.replace(/^\/+/, ''), data);
   }
-  return loadExpanded(all);
+  return all;
 }
 
 // Synchronous part of loading: files are already unpacked (used directly by the macOS app,

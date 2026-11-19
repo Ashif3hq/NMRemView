@@ -163,6 +163,23 @@ final class Store: ObservableObject {
         } catch { errorMessage = "Could not open \(url.lastPathComponent): \(error.localizedDescription)" }
     }
 
+    // MARK: Batch
+
+    @Published var batchResult: BatchResult?
+
+    /// Open ¹H spectra a batch runs over, in sidebar order.
+    var batchIDs: [String] { datasets.filter { $0.nucleus.contains("1H") }.map(\.id) }
+
+    func runBatch(source: String, config: [String: Any]) {
+        guard let core else { return }
+        do { batchResult = try core.batch(source: source, ids: batchIDs, config: config) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    func saveBatchCSV(_ b: BatchResult) {
+        save(Data(b.csv.utf8), name: "batch-" + b.title.replacingOccurrences(of: " ", with: "_") + ".csv", type: .commaSeparatedText)
+    }
+
     // MARK: Overlay / stack
 
     /// Colour slot of a spectrum: its place in the sidebar, so it keeps its colour.

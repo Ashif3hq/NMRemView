@@ -15,3 +15,4 @@ export { EXPORTS, exportAs, plotSVG, toJcamp, toNmrML, spectrumXY, peakTable, in
 export { siPage, acsDataString } from './si.js';
 export { buildProject, openProject, isProject, encodeSource, sessionState, toBase64, fromBase64, PROJECT_EXT } from './project.js';
 export { STACK_COLORS, stackLayout, stackSVG, traceScales, visibleMax, solventRanges, traceName } from './stack.js';
+export { templateFromPolymer, templateProblem, runBatch, batchTable, batchColumns } from './batch.js';

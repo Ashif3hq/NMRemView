@@ -102,6 +102,7 @@ struct ContentView: View {
                     description: Text("Drop Bruker or Varian folders, JCAMP-DX, CSV or .zip files here, or press ⌘O."))
             }
         }
+        .sheet(item: $store.batchResult) { b in BatchSheet(batch: b) }
         .onChange(of: tab) { if tab != .polymer { store.plotMarks = [] } }
         .onChange(of: store.polymerPick) { if store.polymerPick != nil { tab = .polymer } }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in

@@ -18,6 +18,23 @@ struct OpenResult: Codable {
     let warnings: [String]
 }
 
+/// Batch table: one row per spectrum, cells already formatted by the core.
+struct BatchResult: Codable, Identifiable {
+    struct Row: Codable, Identifiable { let id: String; let cells: [String]; let ok: Bool }
+    var id: String { title + String(rows.count) + (rows.first?.id ?? "") }
+    let title: String
+    let template: String
+    let heads: [String]
+    let rows: [Row]
+    let summary: String
+    let csv: String
+    let tsv: String
+}
+
+private struct BatchReply: Codable {
+    let problem: String?
+}
+
 /// A reopened .nmrview project.
 struct ProjectOpenResult: Codable {
     struct Compare: Codable { let mode: String?; let gap: Double?; let scale: String? }
@@ -254,6 +271,15 @@ final class CoreBridge {
     func saveProject(meta: [String: Any]) throws -> String {
         let json = String(data: try JSONSerialization.data(withJSONObject: meta), encoding: .utf8) ?? "{}"
         return try call("saveProject", [json])
+    }
+
+    /// Applies the Polymer set-up of `source` to every id. Throws with the reason if the set-up is incomplete.
+    func batch(source: String, ids: [String], config: [String: Any]) throws -> BatchResult {
+        let idj = String(data: try JSONSerialization.data(withJSONObject: ids), encoding: .utf8) ?? "[]"
+        let cj = String(data: try JSONSerialization.data(withJSONObject: config), encoding: .utf8) ?? "{}"
+        let out = try call("batch", [source, idj, cj])
+        if let p = (try? decode(out) as BatchReply)?.problem { throw CoreError.script(p) }
+        return try decode(out)
     }
 
     func openProject(text: String) throws -> ProjectOpenResult {

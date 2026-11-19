@@ -126,6 +126,27 @@ for (const c of cases) {
   console.log(bad.length ? 'FAIL' : 'ok  ', 'SI export', bad.join('; '));
   if (bad.length) fail++;
 }
+// Batch: one spectrum's Polymer set-up applied to a series gives a DP row per spectrum.
+{
+  const bad = [];
+  const ld = async (f) => (await N.loadFiles(new Map([[f, new Uint8Array(fs.readFileSync('web/samples/' + f))]]))).datasets[0];
+  const ibu = await ld('ibuprofen-1h.zip');
+  const r = N.createSession(ibu).run();
+  const at = (x) => r.analysis.multiplets.filter((m) => !m.flag).find((m) => Math.abs(m.ppm - x) < 0.02).ppm;
+  // Aromatic doublet (2H) as "repeat unit", isobutyl CH3 doublet (6H) as "end group": DP = 1.
+  const t = N.templateFromPolymer(r, { polymer: 'custom', repeatSig: at(7.25), repeatH: 2, m0: 100, end: 'custom', endSig: at(0.92).toFixed(4), endH: 6, endCount: 1, endMass: 6, comps: [] });
+  const res = N.runBatch([ibu, await ld('ibuprofen-13c.zip'), await ld('aspirin-1h.zip'), await ld('ibuprofen-1h.zip')], t);
+  const [a, c, asp, b] = res.rows;
+  if (!a.ok || Math.abs(a.dp - 1) > 0.1 || Math.abs(a.mn - (a.dp * 100 + 6)) > 1e-6) bad.push('dp ' + a.dp);
+  if (c.ok || !/Skipped/.test(c.note)) bad.push('13C not skipped');
+  if (asp.ok || !/No end-group peak/.test(asp.note)) bad.push('empty window not flagged');
+  if (!b.ok || Math.abs(b.dp - a.dp) > 1e-9 || !res.stats || res.stats.dp.n !== 2) bad.push('stats');
+  const csv = N.batchTable(res, ',');
+  if (!csv.startsWith('Spectrum,') || !/Mean \(n = 2\)/.test(csv)) bad.push('csv');
+  if (N.templateProblem(N.templateFromPolymer(r, { polymer: 'custom', repeatSig: '', end: 'custom', endSig: '' })) === '') bad.push('problem');
+  console.log(bad.length ? 'FAIL' : 'ok  ', 'batch table', bad.join('; '));
+  if (bad.length) fail++;
+}
 // Partial Bruker selections: a pdata folder alone loads its processed spectrum; a lone fid or
 // parameter file gives one clear hint, never "No 1D NMR data found in JCAMP file".
 {

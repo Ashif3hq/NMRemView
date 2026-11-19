@@ -56,6 +56,13 @@ Supporting Information in one click: **SI page…** (web, next to the report) or
 (d, *J* = 8.0 Hz, 2H), …, and the figure for each spectrum (all spectra in the overlay / stack).
 Print it to PDF, or copy the data string formatted for Word.
 
+Batch a whole series: set up the Polymer panel once (polymer, counting and end-group signals, H
+counts, masses, monomers), then **Batch: whole series → Run** applies it to every open ¹H spectrum
+(open a folder of experiments to load them all) with the same processing and the same integral
+windows. You get one table of ∫ repeat, ∫ end, DPₙ, Mₙ, mol/wt % per monomer and microstructure,
+with mean ± SD, that copies straight into Excel or saves as CSV. Windows with no peak are flagged
+instead of giving a number from noise.
+
 Export for other software: the spectrum as JCAMP-DX (MestReNova, TopSpin, ACD/Labs), CSV/TSV
 (Origin, Excel, any plotting tool) or nmrML; the plot as SVG, high-resolution PNG or (Mac) PDF;
 peak and integral tables as CSV or TSV that paste straight into Excel.

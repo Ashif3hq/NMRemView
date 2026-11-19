@@ -111,6 +111,9 @@ select.btn { padding-right: 8px; }
 .report-actions { display: flex; flex-direction: column; gap: 4px; }
 .restore { margin: 4px 8px 8px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.45; background: var(--plot); }
 .restore .row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.dlg > div:has(.batch-wrap) { width: min(1100px, 100%); }
+.batch-wrap { overflow: auto; max-height: 55vh; border: 1px solid var(--line); border-radius: 6px; }
+.batch td, .batch th { white-space: nowrap; }
 .si-frame { width: 100%; height: min(60vh, 640px); border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .report p { margin: 0; flex: 1; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 20px; }

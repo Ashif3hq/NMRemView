@@ -382,6 +382,11 @@ function polymerHTML(it) {
     <div class="formula"><select id="pAddMon" aria-label="Add monomer"><option value="">Add a monomer…</option>${NMR.POLYMERS.map((p) => `<option value="${p.id}">${esc(p.name.replace(/^Poly\(?|\)$/g, ''))}</option>`).join('')}<option value="custom">Custom</option></select></div>
     ${comp.length >= 2 ? `<table class="sig" style="margin-top:8px"><thead><tr><th>Unit</th><th>mol %</th><th>wt %</th></tr></thead><tbody>${comp.map((c) => `<tr><td>${esc(c.name)}</td><td class="mono">${fmt(c.molPct, 1)}</td><td class="mono">${c.wtPct == null ? '–' : fmt(c.wtPct, 1)}</td></tr>`).join('')}</tbody></table>` : '<p class="assign alt">Add two or more monomers, each with a signal that belongs only to it, to get mole and weight fractions.</p>'}
   </div>`;
+  const series = batchItems();
+  out += `<div class="section"><h3>Batch: whole series</h3>
+    <p class="assign alt">Applies this set-up (polymer, counting and end-group signals, H counts, masses, monomers, processing) to every open ¹H spectrum and gives one table of DP, Mn, composition and microstructure. Open a folder of experiments first to load a series.</p>
+    <button class="btn small primary" id="runBatch" type="button" ${series.length ? '' : 'disabled'}>Run on ${series.length} ¹H spectr${series.length === 1 ? 'um' : 'a'}</button>
+  </div>`;
   state.polySummary = summary;
   return out;
 }
@@ -425,6 +430,7 @@ function bindPolymer(it) {
     redraw();
   });
   for (const b of $('tabbody').querySelectorAll('[data-crm]')) b.addEventListener('click', () => { P.comps.splice(+b.dataset.crm, 1); redraw(); });
+  on('runBatch', 'click', () => runBatchUI(it));
   on('copyPoly', 'click', () => {
     const t = state.polySummary;
     try { navigator.clipboard.writeText(t).then(() => toast('Result copied'), () => toast(t)); } catch (e) { toast(t); }
@@ -1047,6 +1053,43 @@ for (const b of document.querySelectorAll('[data-cmp-mode]')) b.addEventListener
 $('gap').addEventListener('input', (e) => { state.compare.gap = +e.target.value / 100; refreshCompare(); });
 $('commonScale').addEventListener('click', () => { state.compare.scale = state.compare.scale === 'common' ? 'each' : 'common'; refreshCompare(); });
 syncCompareControls();
+
+// ---------- Batch: the Polymer set-up of one spectrum applied to the whole series ----------
+function batchItems() {
+  const h = state.items.filter((x) => /1H/.test(x.ds.nucleus));
+  const own = h.filter((x) => !x.sample);
+  return own.length ? own : h;
+}
+function runBatchUI(it) {
+  const t = NMR.templateFromPolymer(it.result, polyState(it));
+  const problem = NMR.templateProblem(t);
+  if (problem) return toast(problem);
+  const list = batchItems();
+  setStatus(`Batch: ${list.length} spectra…`);
+  let res;
+  try { res = NMR.runBatch(list.map((x) => x.ds), t); } catch (e) { setStatus('Batch failed'); return toast(e.message); }
+  setStatus(`Batch done: ${res.rows.filter((r) => r.ok).length} of ${list.length} with DP`);
+  const cols = NMR.batchColumns(res);
+  const st = res.stats;
+  const head = cols.map((c) => `<th>${esc(c.head)}</th>`).join('');
+  const body = res.rows.map((r, k) => `<tr data-bi="${k}" class="${r.ok ? '' : 'muted'}" title="Open this spectrum">${cols.map((c) => `<td class="${c.head === 'Spectrum' || c.head === 'Note' || c.head === 'File' ? '' : 'mono'}">${esc(c.cell(r))}</td>`).join('')}</tr>`).join('');
+  const foot = st && st.dp ? `<p class="assign">Mean DPₙ <b class="mono">${st.dp.mean.toFixed(1)} ± ${st.dp.sd.toFixed(1)}</b>${st.mn ? `, Mₙ <b class="mono">${Math.round(st.mn.mean).toLocaleString('en-US')} ± ${Math.round(st.mn.sd).toLocaleString('en-US')} g/mol</b>` : ''} (mean ± SD, n = ${st.dp.n})</p>` : '';
+  showDialog(`Batch results · ${t.polymerName}`, { html: `
+    <p class="assign alt">Template from <b>${esc(it.ds.title || it.ds.name)}</b>: M₀ ${t.m0} g/mol, ${t.repeat.nH}H per unit; end group ${esc(t.endName || 'custom')}, ${t.end.nH}H × ${t.end.count}, ${t.end.mass} g/mol. Integrals are per chain (end group = ${t.end.nH * t.end.count}H). Each file keeps its own referencing; check a row by clicking it.</p>
+    <div class="batch-wrap"><table class="sig batch">${`<thead><tr>${head}</tr></thead>`}<tbody>${body}</tbody></table></div>
+    ${foot}
+    <div class="row">
+      <button class="btn small" type="button" id="bCopy">Copy for Excel</button>
+      <button class="btn small primary" type="button" id="bCsv">Download CSV</button>
+    </div>` });
+  const items = list;
+  for (const tr of document.querySelectorAll('#dlgBody [data-bi]')) tr.addEventListener('click', () => {
+    const i = state.items.indexOf(items[+tr.dataset.bi]);
+    if (i >= 0) { $('dlg').hidden = true; choose(i); setTab('polymer'); }
+  });
+  $('bCopy').onclick = () => navigator.clipboard.writeText(NMR.batchTable(res, '\t')).then(() => toast('Table copied; paste into Excel'), () => toast('Copy was blocked; use Download CSV'));
+  $('bCsv').onclick = () => { download(NMR.batchTable(res, ','), 'batch-' + (t.polymer || 'polymer') + '-' + new Date().toISOString().slice(0, 10) + '.csv', 'text/csv'); toast('If nothing downloads, use Copy for Excel'); };
+}
 
 // ---------- Projects: save to a .nmrview file, reopen it, and an autosaved draft ----------
 function projectText() {

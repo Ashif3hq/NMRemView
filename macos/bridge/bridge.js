@@ -5,6 +5,7 @@ import {
   POLYMERS, END_GROUPS, degreeOfPolymerisation, composition, microstructure, repeatArea, windowArea,
   snapToPeak, findSolvent, EXPORTS, exportAs, stackSVG, STACK_COLORS,
   buildProject, openProject, siPage, acsDataString,
+  templateFromPolymer, templateProblem, runBatch, batchTable, batchColumns,
 } from '../../core/index.js';
 
 const sessions = new Map();
@@ -127,6 +128,27 @@ globalThis.NMRBridge = {
       return r && { result: r, name: r.spectrum.title, ...(k === 0 && typeof hi === 'number' && typeof lo === 'number' && hi > lo ? { hi, lo } : {}) };
     }).filter(Boolean);
     return siPage(entries);
+  },
+  // Batch: the Polymer config of one spectrum (same shape as polymer()) applied to datasets ids.
+  // -> JSON { title, template, heads, rows: [{ id, cells, ok }], summary, csv, tsv } or { problem }.
+  batch(sourceId, idsJSON, configJSON) {
+    const r = lastResults.get(sourceId);
+    if (!r) return JSON.stringify({ problem: 'Run the dataset first' });
+    const t = templateFromPolymer(r, JSON.parse(configJSON));
+    const problem = templateProblem(t);
+    if (problem) return JSON.stringify({ problem });
+    const ids = JSON.parse(idsJSON).filter((id) => sessions.has(id));
+    const res = runBatch(ids.map((id) => sessions.get(id).dataset), t);
+    const cols = batchColumns(res);
+    const st = res.stats;
+    const summary = st && st.dp ? `Mean DPn ${st.dp.mean.toFixed(1)} ± ${st.dp.sd.toFixed(1)}` + (st.mn ? `, Mn ${Math.round(st.mn.mean)} ± ${Math.round(st.mn.sd)} g/mol` : '') + ` (mean ± SD, n = ${st.dp.n})` : '';
+    return JSON.stringify({
+      title: t.polymerName,
+      template: `M0 ${t.m0} g/mol, ${t.repeat.nH}H per unit; end group ${t.endName || 'custom'}, ${t.end.nH}H × ${t.end.count}, ${t.end.mass} g/mol. Integrals per chain (end group = ${t.end.nH * t.end.count}H).`,
+      heads: cols.map((c) => c.head),
+      rows: res.rows.map((row, k) => ({ id: ids[k], cells: cols.map((c) => String(c.cell(row))), ok: row.ok })),
+      summary, csv: batchTable(res, ','), tsv: batchTable(res, '\t'),
+    });
   },
   acs(id, html) { const r = lastResults.get(id); return r ? acsDataString(r, { html: !!html }) : ''; },
   polymerLibrary() {

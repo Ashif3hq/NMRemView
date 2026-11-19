@@ -1,6 +1,6 @@
 {
   "name": "nmremview",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "description": "NMRemView: 1H/13C NMR processing and analysis core, web app and macOS app",

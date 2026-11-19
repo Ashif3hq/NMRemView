@@ -45,7 +45,12 @@ struct ContentView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
-            .toolbar { Button { store.presentOpenPanel() } label: { Label("Open", systemImage: "folder") } }
+            .toolbar {
+                Button { store.presentOpenPanel() } label: { Label("Open", systemImage: "folder") }
+                Button { store.saveProject() } label: { Label("Save Project", systemImage: "square.and.arrow.down") }
+                    .help("Save every spectrum with your edits as one .nmrview file (⌘S)")
+                    .disabled(store.datasets.isEmpty)
+            }
         } detail: {
             if let r = store.current {
                 HSplitView {
@@ -97,6 +102,7 @@ struct ContentView: View {
                     description: Text("Drop Bruker or Varian folders, JCAMP-DX, CSV or .zip files here, or press ⌘O."))
             }
         }
+        .sheet(item: $store.batchResult) { b in BatchSheet(batch: b) }
         .onChange(of: tab) { if tab != .polymer { store.plotMarks = [] } }
         .onChange(of: store.polymerPick) { if store.polymerPick != nil { tab = .polymer } }
         .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in

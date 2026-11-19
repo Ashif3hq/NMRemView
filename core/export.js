@@ -1,6 +1,8 @@
 // Exports for other software: JCAMP-DX, nmrML, plain x/y text, peak and integral tables, and the
 // plot as SVG. Each takes a session result (session.run()) and returns a string.
 
+import { siPage, acsDataString } from './si.js';
+
 const isC13 = (r) => /13C/.test(r.spectrum.nucleus);
 
 // Signals worth reporting: the ones the integral brackets show.
@@ -246,11 +248,17 @@ export const EXPORTS = [
   { id: 'ints-csv', label: 'Integrals and multiplets (CSV)', suffix: '-integrals.csv', type: 'text/csv', group: 'Tables' },
   { id: 'ints-tsv', label: 'Integrals and multiplets (TSV, for Excel)', suffix: '-integrals.tsv', type: 'text/tab-separated-values', group: 'Tables' },
   { id: 'report', label: 'Journal report (text)', suffix: '-report.txt', type: 'text/plain', group: 'Tables' },
+  { id: 'si-html', label: 'SI page: ACS data string + figure (HTML, print to PDF)', suffix: '-SI.html', type: 'text/html', group: 'SI' },
+  { id: 'acs', label: 'ACS data string (text)', suffix: '-ACS.txt', type: 'text/plain', group: 'SI' },
+  { id: 'acs-html', label: 'ACS data string (HTML, pastes into Word with formatting)', suffix: '-ACS.html', type: 'text/html', group: 'SI' },
 ];
 
 export function exportAs(r, id, opts = {}) {
   switch (id) {
     case 'svg': return plotSVG(r, opts);
+    case 'si-html': return siPage([{ result: r, hi: opts.hi, lo: opts.lo }]);
+    case 'acs': return acsDataString(r) + '\n';
+    case 'acs-html': return acsDataString(r, { html: true });
     case 'jcamp': return toJcamp(r);
     case 'xy-csv': return spectrumXY(r, ',');
     case 'xy-tsv': return spectrumXY(r, '\t');

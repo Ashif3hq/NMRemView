@@ -1591,15 +1591,15 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const snr = opts.snr ?? (/13C/.test(spec.nucleus) ? 6 : 8);
     const thr = Math.max(snr * noise, (opts.minRelative ?? 2e-3) * max);
     const hzPerPt = Math.abs(ax.step) * spec.frequency;
-    const win = Math.max(2, Math.round(1.5 / hzPerPt));
-    const maxWin = Math.max(win, Math.round(40 / hzPerPt));
+    const win2 = Math.max(2, Math.round(1.5 / hzPerPt));
+    const maxWin = Math.max(win2, Math.round(40 / hzPerPt));
     const peaks = [];
     for (let i = 2; i < n - 2; i++) {
       const v = y[i];
       if (v < thr || v < y[i - 1] || v < y[i + 1]) continue;
       if (v === y[i - 1]) continue;
       let found = false;
-      for (let w = win; w <= maxWin && !found; w *= 4) {
+      for (let w = win2; w <= maxWin && !found; w *= 4) {
         let lmin = v, rmin = v, ok = true;
         for (let k = 1; k <= w; k++) {
           if (i - k >= 0) {
@@ -2295,18 +2295,25 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       compounds: matchCompounds(signals, nucleus)
     };
   }
-  function journalReport(spec, signals) {
-    const nucleus = /13C/.test(spec.nucleus) ? "13C" : "1H";
+  function journalReport(spec, signals, opts = {}) {
+    const html = !!opts.html;
+    const c13 = /13C/.test(spec.nucleus);
     const solvent = findSolvent(spec.solvent);
-    const sup = (t) => t.replace(/\d/g, (d) => "\u2070\xB9\xB2\xB3\u2074\u2075\u2076\u2077\u2078\u2079"[d]);
+    const sup = (t) => html ? `<sup>${t}</sup>` : t.replace(/\d/g, (d) => "\u2070\xB9\xB2\xB3\u2074\u2075\u2076\u2077\u2078\u2079"[d]);
+    const subDigits = (t) => html ? t.replace(/\d+/g, (d) => `<sub>${d}</sub>`) : t.replace(/\d/g, (d) => "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089"[d]);
+    const esc2 = (t) => html ? String(t).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) : String(t);
     const iso = String(spec.nucleus || "1H").match(/^(\d+)([A-Za-z]+)$/);
-    const head = `${iso ? sup(iso[1]) + iso[2] : spec.nucleus} NMR (${Math.round(spec.frequency || 0)} MHz, ${solvent ? solvent.id : spec.solvent || "solvent"}) \u03B4 `;
+    const nuc = iso ? sup(iso[1]) + iso[2] : esc2(spec.nucleus);
+    const label = c13 ? `${nuc}{${sup("1")}H}` : nuc;
+    const solv = solvent ? subDigits(esc2(solvent.id)) : esc2(spec.solvent || "solvent");
+    const head = `${label} NMR (${Math.round(spec.frequency || 0)} MHz, ${solv}) \u03B4 `;
     const list = signals.filter((s) => !s.minor && !(s.flag && s.flag.kind === "solvent")).sort((a, b) => b.ppm - a.ppm);
-    if (nucleus === "13C") return head + list.map((s) => s.ppm.toFixed(1)).join(", ") + ".";
+    if (c13) return head + list.map((s) => s.ppm.toFixed(1)).join(", ") + ".";
+    const J = html ? "<i>J</i>" : "J";
     return head + list.map((s) => {
-      const shift = s.multiplicity === "m" ? `${s.ppmFrom.toFixed(2)} \u2013 ${s.ppmTo.toFixed(2)}` : s.ppm.toFixed(2);
-      const J = s.J.length ? `, J = ${s.J.map((j) => j.toFixed(1)).join(", ")} Hz` : "";
-      return `${shift} (${s.multiplicity}${J}, ${Math.max(1, Math.round(s.nH || 0))}H)`;
+      const shift = s.multiplicity === "m" ? `${s.ppmFrom.toFixed(2)}\u2013${s.ppmTo.toFixed(2)}` : s.ppm.toFixed(2);
+      const j = s.J.length ? `, ${J} = ${s.J.map((x) => x.toFixed(1)).join(", ")} Hz` : "";
+      return `${shift} (${s.multiplicity}${j}, ${Math.max(1, Math.round(s.nH || 0))}H)`;
     }).join(", ") + ".";
   }
   var ATOMIC = { H: 1.008, C: 12.011, N: 14.007, O: 15.999, F: 18.998, P: 30.974, S: 32.06, Cl: 35.45, Br: 79.904, I: 126.904, Si: 28.085, B: 10.81, Na: 22.99, Li: 6.94, Se: 78.971, Sn: 118.71, D: 2.014 };
@@ -2436,7 +2443,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         }
       }
       const sug = suggest(spec, a, { totalH, formula: fi });
-      const visible = signals.filter((m) => !m.excluded);
+      const visible2 = signals.filter((m) => !m.excluded);
       return {
         spectrum: spec,
         baseline,
@@ -2444,7 +2451,7 @@ if (typeof globalThis.TextDecoder === 'undefined') {
         suggestions: sug,
         formula: fi,
         integralUnit,
-        report: journalReport(spec, visible),
+        report: journalReport(spec, visible2),
         params: { ...params }
       };
     }
@@ -2493,8 +2500,8 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     const is13 = /13C/.test(spec.nucleus);
     const target = sol && (is13 ? sol.c[0] : /1H/.test(spec.nucleus) ? sol.h[0] : void 0);
     if (target === void 0) return 0;
-    const win = is13 ? 1.5 : 0.12;
-    const near = peaks.filter((p) => Math.abs(p.ppm - target) < win);
+    const win2 = is13 ? 1.5 : 0.12;
+    const near = peaks.filter((p) => Math.abs(p.ppm - target) < win2);
     if (!near.length) return 0;
     const top = near.reduce((b, p) => p.height > b.height ? p : b);
     const span = is13 ? 0.8 : 0.03;
@@ -2630,6 +2637,64 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       return A(5.25, 4.95) + A(4.82, 4.6) / 2 + A(5.9, 5.55);
     }
     return A(polymer.signal.from, polymer.signal.to);
+  }
+
+  // core/si.js
+  var esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  var visible = (r) => r.analysis.multiplets.filter((m) => !m.excluded);
+  function acsDataString(r, opts = {}) {
+    return journalReport(r.spectrum, visible(r), opts);
+  }
+  function siPage(entries, opts = {}) {
+    const list = entries.filter((e) => e && e.result);
+    const date = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const sections = list.map((e, k) => {
+      const r = e.result, s = r.spectrum;
+      const name = e.name || s.title || s.name || `Spectrum ${k + 1}`;
+      const svg = plotSVG(r, { hi: e.hi, lo: e.lo, width: 1400, height: 620, labels: opts.labels !== false, integrals: opts.integrals !== false, title: "" }).replace(/^<\?xml[^>]*>\s*/, "");
+      const meta = [s.nucleus, s.frequency ? `${Math.round(s.frequency)} MHz` : "", s.solvent, s.name].filter(Boolean).map(esc).join(" \xB7 ");
+      return `<section>
+  <h2>${esc(name)}</h2>
+  <p class="data">${acsDataString(r, { html: true })}</p>
+  <figure>${svg}<figcaption>Figure S${k + 1}. ${esc(name)}, ${journalHead(s)}.</figcaption></figure>
+  <p class="meta">${meta}</p>
+</section>`;
+    }).join("\n");
+    const title = opts.title || "Supporting Information: NMR spectra";
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body { font: 11pt/1.45 "Times New Roman", Times, serif; color: #111; background: #fff; max-width: 190mm; margin: 0 auto; padding: 12px 16px 40px; }
+  h1 { font: 600 15pt/1.3 Helvetica, Arial, sans-serif; margin: 0 0 4px; }
+  .sub { font: 9pt Helvetica, Arial, sans-serif; color: #666; margin: 0 0 18px; }
+  section { break-inside: avoid; page-break-inside: avoid; margin: 0 0 22px; }
+  section + section { break-before: auto; }
+  h2 { font: 600 12pt/1.3 Helvetica, Arial, sans-serif; margin: 0 0 6px; }
+  .data { margin: 0 0 8px; text-align: justify; }
+  figure { margin: 0; }
+  figure svg { width: 100%; height: auto; display: block; border: 0.5pt solid #ddd; }
+  figcaption { font-size: 9.5pt; color: #333; margin-top: 4px; }
+  .meta { font: 8.5pt Menlo, Consolas, monospace; color: #777; margin: 4px 0 0; }
+  footer { font: 8.5pt Helvetica, Arial, sans-serif; color: #888; margin-top: 24px; }
+</style>
+</head>
+<body>
+<h1>${esc(title)}</h1>
+<p class="sub">${list.length} spectr${list.length === 1 ? "um" : "a"} \xB7 ${date}</p>
+${sections}
+<footer>Processed and reported with NMRemView. Check every value before submission.</footer>
+</body>
+</html>
+`;
+  }
+  function journalHead(s) {
+    const c13 = /13C/.test(s.nucleus);
+    return `${c13 ? "<sup>13</sup>C{<sup>1</sup>H}" : "<sup>1</sup>H"} NMR spectrum (${Math.round(s.frequency || 0)} MHz, ${esc(s.solvent || "").replace(/\d+/g, "<sub>$&</sub>")})`;
   }
 
   // core/export.js
@@ -2886,12 +2951,21 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     { id: "peaks-tsv", label: "Peak list (TSV, for Excel)", suffix: "-peaks.tsv", type: "text/tab-separated-values", group: "Tables" },
     { id: "ints-csv", label: "Integrals and multiplets (CSV)", suffix: "-integrals.csv", type: "text/csv", group: "Tables" },
     { id: "ints-tsv", label: "Integrals and multiplets (TSV, for Excel)", suffix: "-integrals.tsv", type: "text/tab-separated-values", group: "Tables" },
-    { id: "report", label: "Journal report (text)", suffix: "-report.txt", type: "text/plain", group: "Tables" }
+    { id: "report", label: "Journal report (text)", suffix: "-report.txt", type: "text/plain", group: "Tables" },
+    { id: "si-html", label: "SI page: ACS data string + figure (HTML, print to PDF)", suffix: "-SI.html", type: "text/html", group: "SI" },
+    { id: "acs", label: "ACS data string (text)", suffix: "-ACS.txt", type: "text/plain", group: "SI" },
+    { id: "acs-html", label: "ACS data string (HTML, pastes into Word with formatting)", suffix: "-ACS.html", type: "text/html", group: "SI" }
   ];
   function exportAs(r, id, opts = {}) {
     switch (id) {
       case "svg":
         return plotSVG(r, opts);
+      case "si-html":
+        return siPage([{ result: r, hi: opts.hi, lo: opts.lo }]);
+      case "acs":
+        return acsDataString(r) + "\n";
+      case "acs-html":
+        return acsDataString(r, { html: true });
       case "jcamp":
         return toJcamp(r);
       case "xy-csv":
@@ -2913,6 +2987,82 @@ if (typeof globalThis.TextDecoder === 'undefined') {
       default:
         throw new Error("Unknown export " + id);
     }
+  }
+
+  // core/project.js
+  var PROJECT_FORMAT = "nmremview-project";
+  var PROJECT_VERSION = 1;
+  var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  function fromBase64(str) {
+    const map = new Uint8Array(128);
+    for (let i = 0; i < B64.length; i++) map[B64.charCodeAt(i)] = i;
+    const s = str.replace(/[^A-Za-z0-9+/]/g, "");
+    const out = new Uint8Array(Math.floor(s.length * 3 / 4));
+    let o = 0;
+    for (let i = 0; i < s.length; i += 4) {
+      const v = map[s.charCodeAt(i)] << 18 | map[s.charCodeAt(i + 1)] << 12 | map[s.charCodeAt(i + 2)] << 6 | map[s.charCodeAt(i + 3)];
+      out[o++] = v >> 16 & 255;
+      if (i + 2 < s.length) out[o++] = v >> 8 & 255;
+      if (i + 3 < s.length) out[o++] = v & 255;
+    }
+    return out.subarray(0, o);
+  }
+  function sessionState(params) {
+    const p = JSON.parse(JSON.stringify(params));
+    p.autoPhase = false;
+    p.autoReference = false;
+    return p;
+  }
+  function buildProject(sources2, items, view = {}, app = "NMRemView") {
+    const used = [...new Set(items.map((it) => it.source))].sort((a, b) => a - b);
+    const remap = new Map(used.map((s, k) => [s, k]));
+    return JSON.stringify({
+      format: PROJECT_FORMAT,
+      version: PROJECT_VERSION,
+      app,
+      saved: (/* @__PURE__ */ new Date()).toISOString(),
+      view: { current: view.current ?? 0, compare: view.compare || { mode: "single", gap: 0.6, scale: "each" } },
+      items: items.map((it) => ({
+        source: remap.get(it.source),
+        index: it.index,
+        name: it.name || "",
+        title: it.title || "",
+        cmp: !!it.cmp,
+        color: it.color ?? null,
+        params: sessionState(it.params)
+      })),
+      sources: used.map((s) => ({ files: sources2[s] }))
+    });
+  }
+  function openProject(text) {
+    let doc;
+    try {
+      doc = JSON.parse(text);
+    } catch (e) {
+      throw new Error("This is not an NMRemView project file (it could not be read)");
+    }
+    if (!doc || doc.format !== PROJECT_FORMAT) throw new Error("This is not an NMRemView project file");
+    if (doc.version > PROJECT_VERSION) throw new Error("This project was saved by a newer NMRemView; please update the app");
+    const warnings = [];
+    const loaded = (doc.sources || []).map((src) => {
+      const files = new Map(Object.entries(src.files || {}).map(([p, b]) => [p, fromBase64(b)]));
+      return loadExpanded(files);
+    });
+    const entries = [];
+    for (const item of doc.items || []) {
+      const set = loaded[item.source];
+      let ds = set && set.datasets[item.index];
+      if (set && (!ds || item.name && ds.name !== item.name)) ds = set.datasets.find((d) => d.name === item.name) || ds;
+      if (!ds) {
+        warnings.push(`${item.title || item.name || "A spectrum"} could not be reopened from the saved data`);
+        continue;
+      }
+      if (item.title) ds.title = item.title;
+      const session = createSession(ds);
+      Object.assign(session.params, item.params || {});
+      entries.push({ ds, session, item, source: item.source });
+    }
+    return { entries, sources: (doc.sources || []).map((s) => s.files || {}), view: doc.view || {}, warnings, saved: doc.saved };
   }
 
   // core/stack.js
@@ -3013,10 +3163,159 @@ if (typeof globalThis.TextDecoder === 'undefined') {
 `;
   }
 
+  // core/batch.js
+  var area = (spec, w) => Math.max(0, integrateRange(spec, Math.max(w[0], w[1]), Math.min(w[0], w[1]), { local: true }).area);
+  function signalAt(result, sig) {
+    const x = typeof sig === "number" ? sig : parseFloat(sig);
+    if (!isFinite(x)) return null;
+    return result.analysis.multiplets.find((m) => !m.excluded && Math.abs(m.ppm - x) < 1e-3) || null;
+  }
+  var win = (m) => m ? [+m.ppmFrom.toFixed(4), +m.ppmTo.toFixed(4)] : null;
+  function templateFromPolymer(result, cfg) {
+    const p = result.params;
+    const poly = POLYMERS.find((x) => x.id === cfg.polymer) || null;
+    const endPreset = END_GROUPS.find((g) => g.id === cfg.end) || null;
+    const repeat = cfg.repeatSig === "window" && poly ? { window: "standard" } : { window: win(signalAt(result, cfg.repeatSig)) };
+    const end = cfg.endSig === "window" && endPreset && endPreset.window ? { window: endPreset.window.slice() } : { window: win(signalAt(result, cfg.endSig)) };
+    return {
+      version: 1,
+      polymer: poly ? poly.id : "custom",
+      polymerName: poly ? poly.name : "Custom repeat unit",
+      endName: endPreset ? endPreset.name : "",
+      processing: { lb: p.lb, baseline: !!p.baseline, snr: p.snr, reverse: !!p.reverse },
+      repeat: { ...repeat, nH: +cfg.repeatH || 1 },
+      m0: +cfg.m0 || 0,
+      end: { ...end, nH: +cfg.endH || 1, count: Math.max(1, Math.round(+cfg.endCount || 1)), mass: +cfg.endMass || 0 },
+      comps: (cfg.comps || []).map((c) => ({ name: c.name || "Unit", window: win(signalAt(result, c.sig)), nH: +c.nH || 1, m0: +c.m0 || 0 })).filter((c) => c.window)
+    };
+  }
+  function templateProblem(t) {
+    if (!t) return "No template";
+    if (!t.repeat.window) return "Choose a counting signal for the repeat unit first";
+    if (!t.end.window) return "Choose an end-group signal first";
+    return "";
+  }
+  function runBatch(datasets, template) {
+    const problem = templateProblem(template);
+    if (problem) throw new Error(problem);
+    const poly = POLYMERS.find((p) => p.id === template.polymer);
+    const rows = [];
+    for (const ds of datasets) {
+      const row = { name: ds.name || "", title: ds.title || ds.name || "", ok: false, note: "" };
+      rows.push(row);
+      if (!/1H/.test(ds.nucleus)) {
+        row.note = `Skipped: ${ds.nucleus} (batch uses \xB9H)`;
+        continue;
+      }
+      try {
+        const session = createSession(ds);
+        Object.assign(session.params, template.processing || {});
+        const r = session.run();
+        const spec = r.spectrum;
+        const hasPeak = (w) => r.analysis.peaks.some((pk) => pk.ppm <= Math.max(w[0], w[1]) && pk.ppm >= Math.min(w[0], w[1]));
+        const repWin = template.repeat.window === "standard" ? poly ? [poly.signal.from, poly.signal.to] : null : template.repeat.window;
+        if (!hasPeak(template.end.window)) {
+          row.note = "No end-group peak in its window";
+          continue;
+        }
+        if (repWin && !hasPeak(repWin)) {
+          row.note = "No repeat-unit peak in its window";
+          continue;
+        }
+        const repeatA = template.repeat.window === "standard" ? poly ? repeatArea(spec, poly) : 0 : area(spec, template.repeat.window);
+        const endA = area(spec, template.end.window);
+        const perChain = template.end.nH * template.end.count;
+        const unit = endA > 0 ? endA / perChain : 0;
+        row.repeatInt = unit ? repeatA / unit : null;
+        row.endInt = unit ? perChain : null;
+        const dp = degreeOfPolymerisation({
+          repeat: { area: repeatA, nH: template.repeat.nH },
+          end: { area: endA, nH: template.end.nH, count: template.end.count },
+          m0: template.m0,
+          endMass: template.end.mass
+        });
+        row.dp = dp ? dp.dp : null;
+        row.mn = dp ? dp.mn : null;
+        row.comp = template.comps.length >= 2 ? composition(template.comps.map((c) => ({ name: c.name, area: area(spec, c.window), nH: c.nH, m0: c.m0 }))).map((c) => ({ name: c.name, molPct: c.molPct, wtPct: c.wtPct })) : [];
+        const micro = poly && poly.micro ? microstructure(spec, poly.micro) : null;
+        row.micro = micro ? micro.rows.map((m) => ({ label: m.label, pct: m.pct })) : [];
+        row.ok = row.dp != null;
+        if (!row.ok && !row.note) row.note = "DP could not be calculated";
+      } catch (e) {
+        row.note = "Could not process: " + e.message;
+      }
+    }
+    return { rows, template, stats: stats(rows) };
+  }
+  function stats(rows) {
+    const ok = rows.filter((r) => r.ok);
+    if (ok.length < 2) return null;
+    const ms = (k) => {
+      const v = ok.map((r) => r[k]).filter((x) => x != null && isFinite(x));
+      if (v.length < 2) return null;
+      const mean = v.reduce((a, b) => a + b, 0) / v.length;
+      const sd = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / (v.length - 1));
+      return { mean, sd, n: v.length };
+    };
+    return { dp: ms("dp"), mn: ms("mn") };
+  }
+  function batchColumns(res) {
+    const t = res.template;
+    const compNames = [...new Set(res.rows.flatMap((r) => (r.comp || []).map((c) => c.name)))];
+    const microNames = [...new Set(res.rows.flatMap((r) => (r.micro || []).map((m) => m.label)))];
+    const f = (v, d) => v == null || !isFinite(v) ? "" : v.toFixed(d);
+    const cols = [
+      { head: "Spectrum", cell: (r) => r.title },
+      { head: `\u222B repeat (${t.repeat.nH}H/unit)`, cell: (r) => f(r.repeatInt, 2) },
+      { head: `\u222B end (${t.end.nH * t.end.count}H/chain)`, cell: (r) => f(r.endInt, 2) },
+      { head: "DPn", cell: (r) => f(r.dp, 1) },
+      { head: "Mn (g/mol)", cell: (r) => r.mn == null ? "" : String(Math.round(r.mn)) },
+      ...compNames.flatMap((n) => [
+        { head: `${n} mol %`, cell: (r) => f((r.comp || []).find((c) => c.name === n)?.molPct, 1) },
+        { head: `${n} wt %`, cell: (r) => f((r.comp || []).find((c) => c.name === n)?.wtPct, 1) }
+      ]),
+      ...microNames.map((n) => ({ head: `${n} %`, cell: (r) => f((r.micro || []).find((m) => m.label === n)?.pct, 1) })),
+      { head: "Note", cell: (r) => r.note || "" },
+      { head: "File", cell: (r) => r.name }
+    ];
+    return cols;
+  }
+  function batchTable(res, sep = ",") {
+    const cols = batchColumns(res);
+    const cell = (v) => {
+      const s = String(v ?? "");
+      if (sep === "	") return s.replace(/[\t\n]/g, " ");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [cols.map((c) => cell(c.head)).join(sep)];
+    for (const r of res.rows) lines.push(cols.map((c) => cell(c.cell(r))).join(sep));
+    if (res.stats) {
+      const blank = cols.map(() => "");
+      const iDp = cols.findIndex((c) => c.head === "DPn"), iMn = cols.findIndex((c) => c.head === "Mn (g/mol)");
+      const mean = blank.slice(), sd = blank.slice();
+      mean[0] = `Mean (n = ${res.stats.dp ? res.stats.dp.n : 0})`;
+      sd[0] = "SD";
+      if (res.stats.dp) {
+        mean[iDp] = res.stats.dp.mean.toFixed(1);
+        sd[iDp] = res.stats.dp.sd.toFixed(1);
+      }
+      if (res.stats.mn) {
+        mean[iMn] = String(Math.round(res.stats.mn.mean));
+        sd[iMn] = String(Math.round(res.stats.mn.sd));
+      }
+      lines.push(mean.map(cell).join(sep), sd.map(cell).join(sep));
+    }
+    const t = res.template;
+    lines.push("", cell(`Template: ${t.polymerName}, M0 = ${t.m0} g/mol, ${t.repeat.nH}H per unit; end group ${t.endName || "custom"} (${t.end.nH}H \xD7 ${t.end.count}, ${t.end.mass} g/mol)`));
+    return lines.join("\n") + "\n";
+  }
+
   // macos/bridge/bridge.js
   var sessions = /* @__PURE__ */ new Map();
+  var sources = [];
+  var sourceOf = /* @__PURE__ */ new Map();
   var lastResults = /* @__PURE__ */ new Map();
-  function fromBase64(b642) {
+  function fromBase642(b642) {
     const T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     const map = new Uint8Array(128);
     for (let i = 0; i < T.length; i++) map[T.charCodeAt(i)] = i;
@@ -3100,10 +3399,12 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     // files: JSON {"relative/path": "<base64>"} -> JSON {datasets:[{id,title,nucleus}], warnings}
     open(filesJSON) {
       const obj = JSON.parse(filesJSON);
-      const map = new Map(Object.entries(obj).map(([k, v]) => [k, fromBase64(v)]));
+      const map = new Map(Object.entries(obj).map(([k, v]) => [k, fromBase642(v)]));
       const { datasets, warnings } = loadExpanded(map);
-      const list = datasets.map((ds) => {
+      const src = sources.push(obj) - 1;
+      const list = datasets.map((ds, k) => {
         sessions.set(ds.id, createSession(ds));
+        sourceOf.set(ds.id, { src, index: k });
         return { id: ds.id, title: ds.title, nucleus: ds.nucleus, frequency: ds.frequency || 0, solvent: ds.solvent || "", source: ds.source };
       });
       return JSON.stringify({ datasets: list, warnings });
@@ -3119,6 +3420,68 @@ if (typeof globalThis.TextDecoder === 'undefined') {
     close(id) {
       sessions.delete(id);
       lastResults.delete(id);
+      sourceOf.delete(id);
+    },
+    // meta: JSON { ids: [], current: index, compare: { mode, gap, scale }, cmp: [ids] } -> project text.
+    saveProject(metaJSON) {
+      const m = JSON.parse(metaJSON);
+      const cmp = new Set(m.cmp || []);
+      const items = m.ids.filter((id) => sessions.has(id) && sourceOf.has(id)).map((id, k) => {
+        const s = sessions.get(id), o = sourceOf.get(id);
+        return { source: o.src, index: o.index, name: s.dataset.name, title: s.dataset.title, params: s.params, cmp: cmp.has(id), color: k % 8 };
+      });
+      return buildProject(sources, items, { current: m.current || 0, compare: m.compare }, "NMRemView for Mac");
+    },
+    // Project text -> JSON { datasets, warnings, current, compare, cmp: [ids] }.
+    openProject(text) {
+      const p = openProject(text);
+      const base = sources.length;
+      sources.push(...p.sources);
+      const datasets = [], cmp = [];
+      for (const e of p.entries) {
+        sessions.set(e.ds.id, e.session);
+        sourceOf.set(e.ds.id, { src: base + e.source, index: e.item.index });
+        if (e.item.cmp) cmp.push(e.ds.id);
+        const ds = e.ds;
+        datasets.push({ id: ds.id, title: ds.title, nucleus: ds.nucleus, frequency: ds.frequency || 0, solvent: ds.solvent || "", source: ds.source });
+      }
+      return JSON.stringify({ datasets, warnings: p.warnings, current: p.view.current || 0, compare: p.view.compare || null, cmp });
+    },
+    // SI page for several datasets (each must have been run). Optional hi/lo apply to the first.
+    siPage(idsJSON, hi, lo) {
+      const ids = JSON.parse(idsJSON);
+      const entries = ids.map((id, k) => {
+        const r = lastResults.get(id);
+        return r && { result: r, name: r.spectrum.title, ...k === 0 && typeof hi === "number" && typeof lo === "number" && hi > lo ? { hi, lo } : {} };
+      }).filter(Boolean);
+      return siPage(entries);
+    },
+    // Batch: the Polymer config of one spectrum (same shape as polymer()) applied to datasets ids.
+    // -> JSON { title, template, heads, rows: [{ id, cells, ok }], summary, csv, tsv } or { problem }.
+    batch(sourceId, idsJSON, configJSON) {
+      const r = lastResults.get(sourceId);
+      if (!r) return JSON.stringify({ problem: "Run the dataset first" });
+      const t = templateFromPolymer(r, JSON.parse(configJSON));
+      const problem = templateProblem(t);
+      if (problem) return JSON.stringify({ problem });
+      const ids = JSON.parse(idsJSON).filter((id) => sessions.has(id));
+      const res = runBatch(ids.map((id) => sessions.get(id).dataset), t);
+      const cols = batchColumns(res);
+      const st = res.stats;
+      const summary = st && st.dp ? `Mean DPn ${st.dp.mean.toFixed(1)} \xB1 ${st.dp.sd.toFixed(1)}` + (st.mn ? `, Mn ${Math.round(st.mn.mean)} \xB1 ${Math.round(st.mn.sd)} g/mol` : "") + ` (mean \xB1 SD, n = ${st.dp.n})` : "";
+      return JSON.stringify({
+        title: t.polymerName,
+        template: `M0 ${t.m0} g/mol, ${t.repeat.nH}H per unit; end group ${t.endName || "custom"}, ${t.end.nH}H \xD7 ${t.end.count}, ${t.end.mass} g/mol. Integrals per chain (end group = ${t.end.nH * t.end.count}H).`,
+        heads: cols.map((c) => c.head),
+        rows: res.rows.map((row, k) => ({ id: ids[k], cells: cols.map((c) => String(c.cell(row))), ok: row.ok })),
+        summary,
+        csv: batchTable(res, ","),
+        tsv: batchTable(res, "	")
+      });
+    },
+    acs(id, html) {
+      const r = lastResults.get(id);
+      return r ? acsDataString(r, { html: !!html }) : "";
     },
     polymerLibrary() {
       return JSON.stringify({

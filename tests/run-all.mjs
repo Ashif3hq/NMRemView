@@ -84,6 +84,69 @@ for (const c of cases) {
   console.log(bad.length ? 'FAIL' : 'ok  ', 'overlay / stack', bad.join('; '));
   if (bad.length) fail++;
 }
+// Project files: save edits, reopen, get the same spectrum back (web zips are stored expanded).
+{
+  const bad = [];
+  const files = await N.expandFiles(new Map([['aspirin-1h.zip', new Uint8Array(fs.readFileSync('web/samples/aspirin-1h.zip'))]]));
+  const { datasets } = N.loadExpanded(files);
+  const s = N.createSession(datasets[0]);
+  const r0 = s.run();
+  s.params.manualRegions = [[5.2, 4.8]];
+  s.params.referenceShift += 0.05;
+  s.params.annotations = [{ ppm: 2.3, text: 'OAc', kind: 'label' }];
+  const r1 = s.run();
+  const text = N.buildProject([N.encodeSource(files)], [{ source: 0, index: 0, name: datasets[0].name, title: 'My aspirin', params: s.params, cmp: true, color: 3 }],
+    { current: 0, compare: { mode: 'stack', gap: 0.4, scale: 'each' } });
+  const back = N.openProject(text);
+  const r2 = back.entries[0] && back.entries[0].session.run();
+  if (!r2) bad.push('no entry');
+  else {
+    if (r2.report !== r1.report) bad.push('report differs');
+    if (r2.spectrum.title !== 'My aspirin') bad.push('title');
+    if (r2.params.annotations[0]?.text !== 'OAc') bad.push('label');
+    if (Math.abs(r2.params.ph0 - r0.params.ph0) > 1e-9) bad.push('phase');
+  }
+  if (back.view.compare.mode !== 'stack' || back.entries[0]?.item.color !== 3) bad.push('view');
+  if (!N.isProject('x.nmrview') || !N.isProject('x', new TextEncoder().encode(text))) bad.push('detect');
+  try { N.openProject('{"format":"other"}'); bad.push('accepted junk'); } catch (e) { /* expected */ }
+  console.log(bad.length ? 'FAIL' : 'ok  ', 'project save / reopen', bad.join('; '));
+  if (bad.length) fail++;
+}
+// SI: ACS data string (plain and HTML) and the SI page.
+{
+  const bad = [];
+  const one = async (f) => N.createSession((await N.loadFiles(new Map([[f, new Uint8Array(fs.readFileSync('web/samples/' + f))]]))).datasets[0]).run();
+  const h = await one('ibuprofen-1h.zip'), c = await one('ibuprofen-13c.zip');
+  if (!N.acsDataString(h).startsWith('¹H NMR (600 MHz, CDCl₃) δ ')) bad.push('1H head ' + N.acsDataString(h).slice(0, 40));
+  if (!N.acsDataString(c).startsWith('¹³C{¹H} NMR (151 MHz, CDCl₃) δ ')) bad.push('13C head');
+  const html = N.acsDataString(h, { html: true });
+  if (!html.includes('<i>J</i> = 6.6 Hz') || !html.includes('CDCl<sub>3</sub>')) bad.push('html');
+  const page = N.siPage([{ result: h, name: 'Ibuprofen (1)' }, { result: c }]);
+  if ((page.match(/<section>/g) || []).length !== 2 || !page.includes('Figure S2') || !page.includes('<svg') || page.includes('<?xml')) bad.push('page');
+  console.log(bad.length ? 'FAIL' : 'ok  ', 'SI export', bad.join('; '));
+  if (bad.length) fail++;
+}
+// Batch: one spectrum's Polymer set-up applied to a series gives a DP row per spectrum.
+{
+  const bad = [];
+  const ld = async (f) => (await N.loadFiles(new Map([[f, new Uint8Array(fs.readFileSync('web/samples/' + f))]]))).datasets[0];
+  const ibu = await ld('ibuprofen-1h.zip');
+  const r = N.createSession(ibu).run();
+  const at = (x) => r.analysis.multiplets.filter((m) => !m.flag).find((m) => Math.abs(m.ppm - x) < 0.02).ppm;
+  // Aromatic doublet (2H) as "repeat unit", isobutyl CH3 doublet (6H) as "end group": DP = 1.
+  const t = N.templateFromPolymer(r, { polymer: 'custom', repeatSig: at(7.25), repeatH: 2, m0: 100, end: 'custom', endSig: at(0.92).toFixed(4), endH: 6, endCount: 1, endMass: 6, comps: [] });
+  const res = N.runBatch([ibu, await ld('ibuprofen-13c.zip'), await ld('aspirin-1h.zip'), await ld('ibuprofen-1h.zip')], t);
+  const [a, c, asp, b] = res.rows;
+  if (!a.ok || Math.abs(a.dp - 1) > 0.1 || Math.abs(a.mn - (a.dp * 100 + 6)) > 1e-6) bad.push('dp ' + a.dp);
+  if (c.ok || !/Skipped/.test(c.note)) bad.push('13C not skipped');
+  if (asp.ok || !/No end-group peak/.test(asp.note)) bad.push('empty window not flagged');
+  if (!b.ok || Math.abs(b.dp - a.dp) > 1e-9 || !res.stats || res.stats.dp.n !== 2) bad.push('stats');
+  const csv = N.batchTable(res, ',');
+  if (!csv.startsWith('Spectrum,') || !/Mean \(n = 2\)/.test(csv)) bad.push('csv');
+  if (N.templateProblem(N.templateFromPolymer(r, { polymer: 'custom', repeatSig: '', end: 'custom', endSig: '' })) === '') bad.push('problem');
+  console.log(bad.length ? 'FAIL' : 'ok  ', 'batch table', bad.join('; '));
+  if (bad.length) fail++;
+}
 // Partial Bruker selections: a pdata folder alone loads its processed spectrum; a lone fid or
 // parameter file gives one clear hint, never "No 1D NMR data found in JCAMP file".
 {

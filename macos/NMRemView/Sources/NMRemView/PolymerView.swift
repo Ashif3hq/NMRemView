@@ -152,6 +152,13 @@ struct PolymerView: View {
                         }
                     }
                 }
+                Section("Batch: whole series") {
+                    Text("Applies this set-up (polymer, counting and end-group signals, H counts, masses, monomers, processing) to every open ¹H spectrum and gives one table of DP, Mn, composition and microstructure. Open a folder of experiments first to load a series.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    let n = store.batchIDs.count
+                    Button("Run on \(n) ¹H spectr\(n == 1 ? "um" : "a")") { store.runBatch(source: result.id, config: config) }
+                        .disabled(n == 0)
+                }
             }
             .formStyle(.grouped)
             .onAppear {
@@ -207,5 +214,53 @@ struct PolymerView: View {
             }
         }
         if let p = lib.polymers.first(where: { $0.id == polymerId }) { repeatH = p.nH; m0 = (p.m0 * 100).rounded() / 100 }
+    }
+}
+
+/// Batch results: one row per spectrum, copy for Excel or save as CSV; double-click opens a spectrum.
+struct BatchSheet: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.dismiss) private var dismiss
+    let batch: BatchResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Batch results · \(batch.title)").font(.headline)
+            Text(batch.template).font(.caption).foregroundStyle(.secondary)
+            ScrollView([.horizontal, .vertical]) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
+                    GridRow {
+                        ForEach(batch.heads.indices, id: \.self) { i in
+                            Text(batch.heads[i]).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }
+                    }
+                    Divider()
+                    ForEach(batch.rows) { row in
+                        GridRow {
+                            ForEach(row.cells.indices, id: \.self) { i in
+                                Text(row.cells[i]).font(i == 0 || i >= row.cells.count - 2 ? Font.callout : Font.system(.callout, design: .monospaced))
+                                    .foregroundStyle(row.ok ? .primary : .secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture(count: 2) { store.select(row.id); dismiss() }
+                    }
+                }
+                .padding(8)
+            }
+            .frame(minHeight: 160, maxHeight: 420)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            if !batch.summary.isEmpty { Text(batch.summary).font(.callout.weight(.semibold)) }
+            Text("Double-click a row to open that spectrum. Each file keeps its own shift referencing.").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Copy for Excel") { store.copy(batch.tsv) }
+                Button("Save CSV…") { store.saveBatchCSV(batch) }
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 760, idealWidth: 960)
     }
 }

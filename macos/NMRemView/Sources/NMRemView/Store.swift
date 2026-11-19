@@ -45,6 +45,11 @@ final class Store: ObservableObject {
 
     func open(urls: [URL]) {
         guard let core else { return }
+        // Saved projects open as projects; everything else is NMR data.
+        let projects = urls.filter { $0.pathExtension.lowercased() == "nmrview" }
+        for p in projects { openProject(p) }
+        let urls = urls.filter { $0.pathExtension.lowercased() != "nmrview" }
+        guard !urls.isEmpty else { return }
         var files: [String: Data] = [:]
         var roots: [URL] = []
         for url in urls.map(experimentRoot) where !roots.contains(where: { $0.standardizedFileURL.path == url.standardizedFileURL.path }) {
@@ -72,7 +77,7 @@ final class Store: ObservableObject {
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return url }
         // Self-contained files are opened as they are.
-        if !isDir.boolValue, ["zip", "jdf", "mnova", "jdx", "dx", "jcamp", "nmrml", "xml", "csv", "tsv", "txt", "xy", "asc"]
+        if !isDir.boolValue, ["zip", "nmrview", "jdf", "mnova", "jdx", "dx", "jcamp", "nmrml", "xml", "csv", "tsv", "txt", "xy", "asc"]
             .contains(url.pathExtension.lowercased()) { return url }
         var dir = isDir.boolValue ? url : url.deletingLastPathComponent()
         if !isDir.boolValue, isExperiment(dir) { return dir }
@@ -116,6 +121,63 @@ final class Store: ObservableObject {
         prompt = nil
         if results[id] == nil { apply([:]) }
         if compare.mode != .single { compareIDs.insert(id); runCompared() }
+    }
+
+    // MARK: Projects (.nmrview)
+
+    static let projectType = UTType(filenameExtension: "nmrview") ?? .json
+
+    /// Saves every open spectrum with its edits and a copy of its raw data as one .nmrview file.
+    func saveProject() {
+        guard let core, !datasets.isEmpty else { return }
+        let ids = datasets.map(\.id)
+        var meta: [String: Any] = [
+            "ids": ids, "current": ids.firstIndex { $0 == selection } ?? 0,
+            "compare": ["mode": compare.mode == .single ? "single" : compare.mode.core, "gap": compare.gap, "scale": compare.commonScale ? "common" : "each"] as [String: Any],
+            "cmp": datasets.filter(isCompared).map(\.id),
+        ]
+        if compare.mode == .single { meta["cmp"] = Array(compareIDs) }
+        do {
+            let text = try core.saveProject(meta: meta)
+            let base = (datasets.first { $0.id == selection } ?? datasets[0]).title
+            let name = String(base.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" }.prefix(50))
+            save(Data(text.utf8), name: name + ".nmrview", type: Store.projectType)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func openProject(_ url: URL) {
+        guard let core else { return }
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let r = try core.openProject(text: text)
+            warnings = r.warnings
+            datasets.append(contentsOf: r.datasets)
+            compareIDs.formUnion(r.cmp)
+            if let c = r.compare {
+                compare.mode = c.mode == "overlay" ? .overlay : c.mode == "stack" ? .stack : .single
+                compare.gap = c.gap ?? 0.6
+                compare.commonScale = c.scale == "common"
+            }
+            if !r.datasets.isEmpty { select(r.datasets[min(max(0, r.current), r.datasets.count - 1)].id) }
+            NSDocumentController.shared.noteNewRecentDocumentURL(url)
+        } catch { errorMessage = "Could not open \(url.lastPathComponent): \(error.localizedDescription)" }
+    }
+
+    // MARK: Batch
+
+    @Published var batchResult: BatchResult?
+
+    /// Open ¹H spectra a batch runs over, in sidebar order.
+    var batchIDs: [String] { datasets.filter { $0.nucleus.contains("1H") }.map(\.id) }
+
+    func runBatch(source: String, config: [String: Any]) {
+        guard let core else { return }
+        do { batchResult = try core.batch(source: source, ids: batchIDs, config: config) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    func saveBatchCSV(_ b: BatchResult) {
+        save(Data(b.csv.utf8), name: "batch-" + b.title.replacingOccurrences(of: " ", with: "_") + ".csv", type: .commaSeparatedText)
     }
 
     // MARK: Overlay / stack
@@ -370,6 +432,10 @@ final class Store: ObservableObject {
         guard let core, let id = selection else { return "" }
         let traces = compareTraces
         do {
+            if kind == "si-html" {
+                let ids = traces.isEmpty ? [id] : traces.map(\.result.id)
+                return try core.siPage(ids: ids, range: traces.isEmpty ? range : nil)
+            }
             if kind == "svg", !traces.isEmpty {
                 var o: [String: Any] = [
                     "mode": compare.mode.core, "gap": compare.gap, "scale": compare.commonScale ? "common" : "each", "yScale": yScale,
@@ -387,7 +453,22 @@ final class Store: ObservableObject {
         let text = exportText(f.id, range: range)
         guard !text.isEmpty else { return }
         let ext = f.suffix.split(separator: ".").last.map(String.init) ?? "txt"
-        save(Data(text.utf8), name: fileBase + f.suffix, type: UTType(filenameExtension: ext) ?? .data)
+        let url = save(Data(text.utf8), name: fileBase.replacingOccurrences(of: "-stack", with: "").replacingOccurrences(of: "-overlay", with: "") + f.suffix,
+                       type: UTType(filenameExtension: ext) ?? .data)
+        // The SI page opens in the browser, ready for File → Print → Save as PDF.
+        if f.id == "si-html", let url { NSWorkspace.shared.open(url) }
+    }
+
+    /// Copies the ACS data string with formatting (superscripts, subscripts, italic J) for Word,
+    /// plus plain text for everything else.
+    func copyACS() {
+        let plain = exportText("acs").trimmingCharacters(in: .whitespacesAndNewlines)
+        let html = exportText("acs-html")
+        guard !plain.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(plain, forType: .string)
+        pb.setString("<meta charset=\"utf-8\"><span style=\"font-family: 'Times New Roman'\">\(html)</span>", forType: .html)
     }
 
     func copy(_ text: String) {
@@ -395,13 +476,15 @@ final class Store: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    func save(_ data: Data, name: String, type: UTType) {
+    @discardableResult
+    func save(_ data: Data, name: String, type: UTType) -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
         panel.allowedContentTypes = [type]
         if panel.runModal() == .OK, let url = panel.url {
-            do { try data.write(to: url) } catch { errorMessage = error.localizedDescription }
+            do { try data.write(to: url); return url } catch { errorMessage = error.localizedDescription }
         }
+        return nil
     }
 
     var fileBase: String {

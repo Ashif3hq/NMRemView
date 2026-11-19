@@ -18,6 +18,10 @@ const state = { items: [], current: -1, tab: 'signals', query: '', bands: new Se
 // Overlay / stack of several spectra. Ticked items (it.cmp) of the active nucleus are drawn together.
 state.compare = { mode: 'single', gap: 0.6, scale: 'each' };
 let colorSerial = 0;
+// File sets the person opened (Map path -> bytes, or a project's { path: base64 }); items point
+// into these so a project can carry a copy of the raw data.
+state.sources = [];
+const encodedSources = new Map();
 let tabSaved;
 try { tabSaved = localStorage.getItem('nmremview.tab'); } catch (e) { /* storage unavailable */ }
 if (tabSaved) state.tab = tabSaved;
@@ -52,20 +56,30 @@ function warnHtml(w) {
 }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-open-dir]')) $('dirInput').click(); });
 
-async function addFiles(map, select = true) {
+async function addFiles(map, select = true, sample = false) {
   setStatus('Reading…');
   try {
-    const { datasets, warnings } = await NMR.loadFiles(map);
+    // .nmrview project files open as projects; everything else is NMR data.
+    const rest = new Map();
+    let opened = 0;
+    for (const [p, d] of map) {
+      if (NMR.isProject(p, d)) { openProjectText(new TextDecoder().decode(d)); opened++; } else rest.set(p, d);
+    }
+    if (!rest.size) return;
+    const all = await NMR.expandFiles(rest);
+    const { datasets, warnings } = NMR.loadExpanded(all);
     const w = $('warns');
     w.hidden = !warnings.length; w.innerHTML = warnings.map(warnHtml).join('<br>');
     const first = state.items.length;
-    for (const ds of datasets) {
+    const src = state.sources.push(all) - 1;
+    datasets.forEach((ds, k) => {
       const session = NMR.createSession(ds);
-      state.items.push({ ds, session, result: null, color: colorSerial++ % 8, cmp: false });
-    }
+      state.items.push({ ds, session, result: null, color: colorSerial++ % 8, cmp: false, src, dsIndex: k, sample });
+    });
     if (datasets.length && select) choose(first);
     renderLibrary();
-    setStatus(datasets.length ? `${state.items.length} spectra loaded` : 'Nothing loaded');
+    setStatus(datasets.length || opened ? `${state.items.length} spectra loaded` : 'Nothing loaded');
+    autosaveSoon();
   } catch (e) {
     setStatus('Could not read file');
     toast(e.message);
@@ -89,6 +103,7 @@ function choose(i) {
   syncCompare();
   viewer.setResult(it.result);
   syncControls(); renderLibrary(); renderReport(); renderTab(); updateBands();
+  autosaveSoon();
 }
 
 function rerun(keepView = true) {
@@ -98,6 +113,7 @@ function rerun(keepView = true) {
   syncCompare();
   viewer.setResult(it.result, keepView);
   syncControls(); renderReport(); renderTab(); updateBands();
+  autosaveSoon();
 }
 const set = (p) => { const it = cur(); if (!it) return; Object.assign(it.session.params, p); rerunSoon(); };
 let raf = 0;
@@ -149,6 +165,7 @@ function setCompareMode(m) {
   refreshCompare();
 }
 function refreshCompare() {
+  autosaveSoon();
   syncCompare();
   renderLibrary(); syncCompareControls(); viewer.draw();
 }
@@ -365,6 +382,11 @@ function polymerHTML(it) {
     <div class="formula"><select id="pAddMon" aria-label="Add monomer"><option value="">Add a monomer…</option>${NMR.POLYMERS.map((p) => `<option value="${p.id}">${esc(p.name.replace(/^Poly\(?|\)$/g, ''))}</option>`).join('')}<option value="custom">Custom</option></select></div>
     ${comp.length >= 2 ? `<table class="sig" style="margin-top:8px"><thead><tr><th>Unit</th><th>mol %</th><th>wt %</th></tr></thead><tbody>${comp.map((c) => `<tr><td>${esc(c.name)}</td><td class="mono">${fmt(c.molPct, 1)}</td><td class="mono">${c.wtPct == null ? '–' : fmt(c.wtPct, 1)}</td></tr>`).join('')}</tbody></table>` : '<p class="assign alt">Add two or more monomers, each with a signal that belongs only to it, to get mole and weight fractions.</p>'}
   </div>`;
+  const series = batchItems();
+  out += `<div class="section"><h3>Batch: whole series</h3>
+    <p class="assign alt">Applies this set-up (polymer, counting and end-group signals, H counts, masses, monomers, processing) to every open ¹H spectrum and gives one table of DP, Mn, composition and microstructure. Open a folder of experiments first to load a series.</p>
+    <button class="btn small primary" id="runBatch" type="button" ${series.length ? '' : 'disabled'}>Run on ${series.length} ¹H spectr${series.length === 1 ? 'um' : 'a'}</button>
+  </div>`;
   state.polySummary = summary;
   return out;
 }
@@ -408,6 +430,7 @@ function bindPolymer(it) {
     redraw();
   });
   for (const b of $('tabbody').querySelectorAll('[data-crm]')) b.addEventListener('click', () => { P.comps.splice(+b.dataset.crm, 1); redraw(); });
+  on('runBatch', 'click', () => runBatchUI(it));
   on('copyPoly', 'click', () => {
     const t = state.polySummary;
     try { navigator.clipboard.writeText(t).then(() => toast('Result copied'), () => toast(t)); } catch (e) { toast(t); }
@@ -862,6 +885,8 @@ function showHelp() {
     ['Hover a signal', 'Shows δ, multiplicity, J, integral and label'],
     ['Z H K X I N R L T', 'Zoom, Pan, Peak +, Peak −, Integrate, ∫ = n, δ ref, Label, Note'],
     ['F · Esc', 'Fit · back to Zoom'],
+    ['Save project', 'Saves every spectrum with your edits as one .nmrview file; open it again with Open NMR data'],
+    ['SI page…', 'ACS data string and figure, ready to print to PDF or paste into your SI'],
     ['Single · Overlay · Stack', 'Compare spectra: tick the ones to show in the Spectra list; the active one keeps its labels'],
     ['⌘/Ctrl Z · ⇧⌘/Ctrl Z', 'Undo · Redo'],
   ];
@@ -913,6 +938,7 @@ const svgURL = (svg) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent
 async function exportAs(kind) {
   const it = cur(); if (!it) return toast('Open a spectrum first');
   $('exportMenu').hidden = true;
+  if (kind === 'si-html') return openSI();
   if (kind === 'png') {
     // Rasterise the vector plot at 2× so the PNG is sharp in slides and papers.
     const img = new Image();
@@ -1028,6 +1054,189 @@ $('gap').addEventListener('input', (e) => { state.compare.gap = +e.target.value 
 $('commonScale').addEventListener('click', () => { state.compare.scale = state.compare.scale === 'common' ? 'each' : 'common'; refreshCompare(); });
 syncCompareControls();
 
+// ---------- Batch: the Polymer set-up of one spectrum applied to the whole series ----------
+function batchItems() {
+  const h = state.items.filter((x) => /1H/.test(x.ds.nucleus));
+  const own = h.filter((x) => !x.sample);
+  return own.length ? own : h;
+}
+function runBatchUI(it) {
+  const t = NMR.templateFromPolymer(it.result, polyState(it));
+  const problem = NMR.templateProblem(t);
+  if (problem) return toast(problem);
+  const list = batchItems();
+  setStatus(`Batch: ${list.length} spectra…`);
+  let res;
+  try { res = NMR.runBatch(list.map((x) => x.ds), t); } catch (e) { setStatus('Batch failed'); return toast(e.message); }
+  setStatus(`Batch done: ${res.rows.filter((r) => r.ok).length} of ${list.length} with DP`);
+  const cols = NMR.batchColumns(res);
+  const st = res.stats;
+  const head = cols.map((c) => `<th>${esc(c.head)}</th>`).join('');
+  const body = res.rows.map((r, k) => `<tr data-bi="${k}" class="${r.ok ? '' : 'muted'}" title="Open this spectrum">${cols.map((c) => `<td class="${c.head === 'Spectrum' || c.head === 'Note' || c.head === 'File' ? '' : 'mono'}">${esc(c.cell(r))}</td>`).join('')}</tr>`).join('');
+  const foot = st && st.dp ? `<p class="assign">Mean DPₙ <b class="mono">${st.dp.mean.toFixed(1)} ± ${st.dp.sd.toFixed(1)}</b>${st.mn ? `, Mₙ <b class="mono">${Math.round(st.mn.mean).toLocaleString('en-US')} ± ${Math.round(st.mn.sd).toLocaleString('en-US')} g/mol</b>` : ''} (mean ± SD, n = ${st.dp.n})</p>` : '';
+  showDialog(`Batch results · ${t.polymerName}`, { html: `
+    <p class="assign alt">Template from <b>${esc(it.ds.title || it.ds.name)}</b>: M₀ ${t.m0} g/mol, ${t.repeat.nH}H per unit; end group ${esc(t.endName || 'custom')}, ${t.end.nH}H × ${t.end.count}, ${t.end.mass} g/mol. Integrals are per chain (end group = ${t.end.nH * t.end.count}H). Each file keeps its own referencing; check a row by clicking it.</p>
+    <div class="batch-wrap"><table class="sig batch">${`<thead><tr>${head}</tr></thead>`}<tbody>${body}</tbody></table></div>
+    ${foot}
+    <div class="row">
+      <button class="btn small" type="button" id="bCopy">Copy for Excel</button>
+      <button class="btn small primary" type="button" id="bCsv">Download CSV</button>
+    </div>` });
+  const items = list;
+  for (const tr of document.querySelectorAll('#dlgBody [data-bi]')) tr.addEventListener('click', () => {
+    const i = state.items.indexOf(items[+tr.dataset.bi]);
+    if (i >= 0) { $('dlg').hidden = true; choose(i); setTab('polymer'); }
+  });
+  $('bCopy').onclick = () => navigator.clipboard.writeText(NMR.batchTable(res, '\t')).then(() => toast('Table copied; paste into Excel'), () => toast('Copy was blocked; use Download CSV'));
+  $('bCsv').onclick = () => { download(NMR.batchTable(res, ','), 'batch-' + (t.polymer || 'polymer') + '-' + new Date().toISOString().slice(0, 10) + '.csv', 'text/csv'); toast('If nothing downloads, use Copy for Excel'); };
+}
+
+// ---------- Projects: save to a .nmrview file, reopen it, and an autosaved draft ----------
+function projectText() {
+  // Your own data only; the built-in examples are saved only when nothing else is open.
+  const own = state.items.filter((x) => !x.sample);
+  const keep = own.length ? own : state.items;
+  const current = Math.max(0, keep.indexOf(cur()));
+  const items = keep.map((it) => ({
+    source: it.src, index: it.dsIndex, name: it.ds.name, title: it.ds.title, params: it.session.params, cmp: it.cmp, color: it.color,
+  }));
+  const used = new Set(items.map((i) => i.source));
+  const sources = state.sources.map((s, k) => {
+    if (!used.has(k)) return null;
+    if (!encodedSources.has(k)) encodedSources.set(k, NMR.encodeSource(s instanceof Map ? s : new Map(Object.entries(s))));
+    return encodedSources.get(k);
+  });
+  return NMR.buildProject(sources, items, { current, compare: state.compare }, 'NMRemView web');
+}
+
+function openProjectText(text) {
+  const p = NMR.openProject(text);
+  const base = state.sources.length;
+  state.sources.push(...p.sources);
+  const first = state.items.length;
+  for (const e of p.entries) {
+    const color = e.item.color ?? colorSerial % 8;
+    colorSerial = Math.max(colorSerial, color + 1);
+    state.items.push({ ds: e.ds, session: e.session, result: null, color, cmp: e.item.cmp, src: base + e.source, dsIndex: e.item.index, sample: false });
+  }
+  if (p.warnings.length) { const w = $('warns'); w.hidden = false; w.innerHTML = p.warnings.map(esc).join('<br>'); }
+  if (!p.entries.length) { toast('The project holds no spectra that could be reopened'); return; }
+  const c = p.view.compare || {};
+  state.compare = { mode: c.mode || 'single', gap: c.gap ?? 0.6, scale: c.scale || 'each' };
+  syncCompareControls();
+  choose(first + Math.min(p.entries.length - 1, Math.max(0, p.view.current || 0)));
+  toast(`Opened project: ${p.entries.length} spectr${p.entries.length === 1 ? 'um' : 'a'}`);
+}
+
+function projectName() {
+  const it = state.items.find((x) => !x.sample) || cur();
+  const base = it ? (it.ds.title || it.ds.name || 'nmremview') : 'nmremview';
+  return base.replace(/[^\w.-]+/g, '_').slice(0, 50) + '-' + new Date().toISOString().slice(0, 10) + NMR.PROJECT_EXT;
+}
+
+function download(text, name, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+}
+
+$('saveBtn').addEventListener('click', () => {
+  if (!state.items.length) return toast('Open a spectrum first');
+  try {
+    const text = projectText();
+    download(text, projectName(), 'application/json');
+    toast(`Saved ${projectName()} (${(text.length / 1048576).toFixed(1)} MB). Open it again with Open NMR data`);
+  } catch (e) { toast('Could not save: ' + e.message); console.error(e); }
+});
+
+// Autosaved draft in this browser (IndexedDB holds the multi-MB project; it never leaves the machine).
+function idb(mode, fn) {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open('nmremview', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('drafts');
+      req.onerror = () => resolve(null);
+      req.onsuccess = () => {
+        try {
+          const tx = req.result.transaction('drafts', mode);
+          const r = fn(tx.objectStore('drafts'));
+          tx.oncomplete = () => resolve(r && 'result' in r ? r.result : null);
+          tx.onerror = () => resolve(null);
+        } catch (e) { resolve(null); }
+      };
+    } catch (e) { resolve(null); }
+  });
+}
+let autosaveTimer = 0, restoring = false;
+function autosaveSoon() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    if (restoring || !state.items.some((x) => !x.sample)) return;
+    let text;
+    try { text = projectText(); } catch (e) { return; }
+    const names = state.items.filter((x) => !x.sample).map((x) => x.ds.title || x.ds.name);
+    idb('readwrite', (st) => st.put({ text, saved: Date.now(), names }, 'last'));
+  }, 2000);
+}
+async function offerRestore() {
+  const d = await idb('readonly', (st) => st.get('last'));
+  if (!d || !d.text) return;
+  const el = $('restore');
+  const when = new Date(d.saved).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const names = (d.names || []).slice(0, 3).map(esc).join(', ') + ((d.names || []).length > 3 ? ', …' : '');
+  el.innerHTML = `<b>Unsaved work from ${esc(when)}</b><br>${names}
+    <div class="row"><button class="btn small primary" type="button" data-restore>Restore</button><button class="btn small" type="button" data-discard>Discard</button></div>`;
+  el.hidden = false;
+  el.querySelector('[data-restore]').onclick = () => {
+    el.hidden = true;
+    restoring = true;
+    try { openProjectText(d.text); } catch (e) { toast(e.message); }
+    restoring = false;
+    autosaveSoon();
+  };
+  el.querySelector('[data-discard]').onclick = () => { el.hidden = true; idb('readwrite', (st) => st.delete('last')); };
+}
+
+// ---------- SI page: ACS data string + figure, one click ----------
+function siEntries() {
+  const c = viewer.compareTraces();
+  const list = c ? state.items.filter((x) => c.some((t) => t.result === x.result)) : [cur()].filter(Boolean);
+  return list.map((x) => ({ result: x.result, name: x.ds.title || x.ds.name, ...(x === cur() && viewer.view ? { hi: viewer.view.hi, lo: viewer.view.lo } : {}) }));
+}
+function openSI() {
+  const entries = siEntries();
+  if (!entries.length) return toast('Open a spectrum first');
+  const page = NMR.siPage(entries, { labels: viewer.showLabels, integrals: viewer.showCurves });
+  const plain = entries.map((e) => NMR.acsDataString(e.result)).join('\n');
+  const rich = entries.map((e) => `<p>${NMR.acsDataString(e.result, { html: true })}</p>`).join('');
+  const name = (entries.length > 1 ? 'SI-' + entries.length + '-spectra' : fileBase(cur()) + '-SI').replace(/-(overlay|stack)/, '') + '.html';
+  showDialog(`SI page · ${entries.length} spectr${entries.length === 1 ? 'um' : 'a'}`, { html: `
+    <p class="assign alt">ACS-style data string and figure for ${entries.length > 1 ? 'every spectrum in the overlay / stack' : 'this spectrum (current zoom)'}. Print it to PDF, or copy the data string into your SI document.</p>
+    <iframe class="si-frame" id="siFrame" title="SI page preview"></iframe>
+    <div class="row">
+      <button class="btn small" type="button" id="siCopy">Copy data string</button>
+      <button class="btn small" type="button" id="siCopyRich" title="Keeps superscripts, subscripts and italic J when pasted into Word">Copy formatted (Word)</button>
+      <button class="btn small" type="button" id="siDl">Download HTML</button>
+      <button class="btn small primary" type="button" id="siPrint">Print / Save as PDF</button>
+    </div>` });
+  const fr = $('siFrame');
+  fr.srcdoc = page;
+  $('siCopy').onclick = () => navigator.clipboard.writeText(plain).then(() => toast('Data string copied'), () => toast('Copy was blocked; use Download'));
+  $('siCopyRich').onclick = async () => {
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([rich], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
+      toast('Formatted data string copied');
+    } catch (e) { navigator.clipboard.writeText(plain).then(() => toast('Copied as plain text'), () => toast('Copy was blocked; use Download')); }
+  };
+  $('siDl').onclick = () => { download(page, name, 'text/html'); toast('If nothing downloads, use Print / Save as PDF'); };
+  $('siPrint').onclick = () => {
+    try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch (e) { download(page, name, 'text/html'); toast('Open the downloaded page and print it to PDF'); }
+  };
+}
+$('siBtn').addEventListener('click', openSI);
+
 // ---------- File input ----------
 async function readFileList(list) {
   const map = new Map();
@@ -1082,7 +1291,7 @@ async function loadSample(s, select = true) {
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       name = name.replace(/\.b64\.txt$/, '');
     } else bytes = new Uint8Array(await res.arrayBuffer());
-    await addFiles(new Map([[name, bytes]]), select);
+    await addFiles(new Map([[name, bytes]]), select, true);
     const it = state.items[state.items.length - 1];
     if (it) it.ds.title = s.label.split(' · ')[0];
     renderLibrary();
@@ -1093,6 +1302,7 @@ setTab(state.tab);
 (async () => {
   await loadSample(SAMPLES[0]);
   await loadSample(SAMPLES[1], false);
+  offerRestore();
 })();
 
 // ---------- Theme: light by default, toggle remembered per browser ----------
